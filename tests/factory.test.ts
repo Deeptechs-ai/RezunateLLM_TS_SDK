@@ -3,13 +3,17 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Provider } from "../src/models";
 import type { BaseProvider } from "../src/providers/base";
+import { DeepSeekProvider } from "../src/providers/deepseekProvider";
 import {
+  DeepSeekFactory,
   FACTORY_REGISTRY,
+  GrokFactory,
   getFactory,
   OpenAIFactory,
   ProviderFactory,
   registerFactory,
 } from "../src/providers/factory";
+import { GrokProvider } from "../src/providers/grokProvider";
 import { OpenAIProvider } from "../src/providers/openaiProvider";
 import { mockApiKey } from "./fixtures";
 
@@ -37,18 +41,30 @@ afterEach(() => {
 });
 
 describe("factory registry", () => {
-  it("contains the OpenAI provider", () => {
+  it("contains the ported providers", () => {
     expect(FACTORY_REGISTRY.has(Provider.OPENAI)).toBe(true);
+    expect(FACTORY_REGISTRY.has(Provider.GROK)).toBe(true);
+    expect(FACTORY_REGISTRY.has(Provider.DEEPSEEK)).toBe(true);
   });
 
   it("contains factory instances, not classes", () => {
     expect(FACTORY_REGISTRY.get(Provider.OPENAI)).toBeInstanceOf(OpenAIFactory);
+    expect(FACTORY_REGISTRY.get(Provider.GROK)).toBeInstanceOf(GrokFactory);
+    expect(FACTORY_REGISTRY.get(Provider.DEEPSEEK)).toBeInstanceOf(DeepSeekFactory);
   });
 });
 
 describe("getFactory", () => {
   it("returns the OpenAI factory", () => {
     expect(getFactory(Provider.OPENAI)).toBeInstanceOf(OpenAIFactory);
+  });
+
+  it("returns the Grok factory", () => {
+    expect(getFactory(Provider.GROK)).toBeInstanceOf(GrokFactory);
+  });
+
+  it("returns the DeepSeek factory", () => {
+    expect(getFactory(Provider.DEEPSEEK)).toBeInstanceOf(DeepSeekFactory);
   });
 
   it("ignores the case of the name", () => {
@@ -111,6 +127,52 @@ describe("OpenAIFactory", () => {
 
     expect(provider.maxRetries).toBe(5);
     expect(provider.timeout).toBe(120.0);
+  });
+});
+
+describe("GrokFactory", () => {
+  it("returns the correct provider name", () => {
+    expect(new GrokFactory().providerName).toBe(Provider.GROK);
+  });
+
+  it("creates a Grok provider", () => {
+    const provider = new GrokFactory().createProvider(mockApiKey);
+
+    expect(provider).toBeInstanceOf(GrokProvider);
+    expect(provider.apiKey).toBe(mockApiKey);
+  });
+
+  it("passes settings to the provider", () => {
+    const provider = new GrokFactory().createProvider(mockApiKey, {
+      maxRetries: 5,
+      timeout: 120.0,
+    });
+
+    expect(provider.maxRetries).toBe(5);
+    expect(provider.timeout).toBe(120.0);
+  });
+});
+
+describe("DeepSeekFactory", () => {
+  it("returns the correct provider name", () => {
+    expect(new DeepSeekFactory().providerName).toBe(Provider.DEEPSEEK);
+  });
+
+  it("creates a DeepSeek provider", () => {
+    const provider = new DeepSeekFactory().createProvider(mockApiKey);
+
+    expect(provider).toBeInstanceOf(DeepSeekProvider);
+    expect(provider.apiKey).toBe(mockApiKey);
+  });
+
+  it("passes settings to the provider", () => {
+    const provider = new DeepSeekFactory().createProvider(mockApiKey, {
+      maxRetries: 2,
+      timeout: 45.0,
+    });
+
+    expect(provider.maxRetries).toBe(2);
+    expect(provider.timeout).toBe(45.0);
   });
 });
 

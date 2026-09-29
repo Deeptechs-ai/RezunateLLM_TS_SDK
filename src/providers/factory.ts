@@ -5,6 +5,8 @@
 
 import { Provider } from "../models";
 import type { BaseProvider, ProviderOptions } from "./base";
+import { DeepSeekProvider } from "./deepseekProvider";
+import { GrokProvider } from "./grokProvider";
 import { OpenAIProvider } from "./openaiProvider";
 
 /** Provider settings other than the API key (Python `**kwargs`), e.g. retries and timeout. */
@@ -39,9 +41,33 @@ export class OpenAIFactory extends ProviderFactory {
   }
 }
 
+/** Factory for creating Grok (xAI) provider instances. */
+export class GrokFactory extends ProviderFactory {
+  get providerName(): Provider {
+    return Provider.GROK;
+  }
+
+  createProvider(apiKey: string, kwargs: ProviderKwargs = {}): BaseProvider {
+    return new GrokProvider({ ...kwargs, apiKey });
+  }
+}
+
+/** Factory for creating DeepSeek provider instances. */
+export class DeepSeekFactory extends ProviderFactory {
+  get providerName(): Provider {
+    return Provider.DEEPSEEK;
+  }
+
+  createProvider(apiKey: string, kwargs: ProviderKwargs = {}): BaseProvider {
+    return new DeepSeekProvider({ ...kwargs, apiKey });
+  }
+}
+
 /** Factory registry: maps provider names to factory instances. */
 export const FACTORY_REGISTRY = new Map<string, ProviderFactory>([
   [Provider.OPENAI, new OpenAIFactory()],
+  [Provider.GROK, new GrokFactory()],
+  [Provider.DEEPSEEK, new DeepSeekFactory()],
 ]);
 
 const PROVIDER_VALUES: readonly string[] = Object.values(Provider);

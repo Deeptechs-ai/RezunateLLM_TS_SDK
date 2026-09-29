@@ -2,7 +2,14 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { chatComplete, getAvailableProviders } from "../src/gateway";
-import { mockApiKey, mockFetch, openaiResponse, sampleMessages } from "./fixtures";
+import {
+  deepseekResponse,
+  grokResponse,
+  mockApiKey,
+  mockFetch,
+  openaiResponse,
+  sampleMessages,
+} from "./fixtures";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -26,6 +33,34 @@ describe("chatComplete", () => {
     expect(result.provider).toBe("openai");
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(String(fetch.mock.calls[0]?.[0])).toBe("https://api.openai.com/v1/chat/completions");
+  });
+
+  it("routes to the Grok provider", async () => {
+    const fetch = mockFetch({ json: grokResponse() });
+
+    const result = await chatComplete({
+      provider: "grok",
+      apiKey: mockApiKey,
+      request: { model: "grok-3-mini", messages: sampleMessages() },
+    });
+
+    expect(result.provider).toBe("grok");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(String(fetch.mock.calls[0]?.[0])).toBe("https://api.x.ai/v1/chat/completions");
+  });
+
+  it("routes to the DeepSeek provider", async () => {
+    const fetch = mockFetch({ json: deepseekResponse() });
+
+    const result = await chatComplete({
+      provider: "deepseek",
+      apiKey: mockApiKey,
+      request: { model: "deepseek-chat", messages: sampleMessages() },
+    });
+
+    expect(result.provider).toBe("deepseek");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(String(fetch.mock.calls[0]?.[0])).toBe("https://api.deepseek.com/v1/chat/completions");
   });
 
   it("passes temperature to the provider", async () => {
@@ -105,6 +140,13 @@ describe("getAvailableProviders", () => {
   });
 
   it("contains the ported providers", () => {
-    expect(getAvailableProviders()).toContain("openai");
+    const providers = getAvailableProviders();
+    expect(providers).toContain("openai");
+    expect(providers).toContain("grok");
+    expect(providers).toContain("deepseek");
+  });
+
+  it("returns at least three providers", () => {
+    expect(getAvailableProviders().length).toBeGreaterThanOrEqual(3);
   });
 });

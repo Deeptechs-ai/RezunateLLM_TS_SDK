@@ -13,4 +13,11 @@ export {
   type Message,
   MessageSchema,
 } from "./models";
-export { BaseProvider, getProvider, listProviders, OpenAIProvider } from "./providers";
+export {
+  BaseProvider,
+  DeepSeekProvider,
+  GrokProvider,
+  getProvider,
+  listProviders,
+  OpenAIProvider,
+} from "./providers";

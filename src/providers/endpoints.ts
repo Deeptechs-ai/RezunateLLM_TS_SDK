@@ -4,6 +4,14 @@
 export const OPENAI_BASE_URL = "https://api.openai.com/v1";
 export const OPENAI_CHAT_ENDPOINT = "/chat/completions";
 
+// Grok (xAI) — OpenAI-compatible API
+export const GROK_BASE_URL = "https://api.x.ai/v1";
+export const GROK_CHAT_ENDPOINT = "/chat/completions";
+
+// DeepSeek — OpenAI-compatible API
+export const DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1";
+export const DEEPSEEK_CHAT_ENDPOINT = "/chat/completions";
+
 /**
  * Robustly join baseUrl and endpoint.
  * Handles trailing/leading slashes and fills in `{model}` in the endpoint.

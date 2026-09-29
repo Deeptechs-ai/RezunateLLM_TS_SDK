@@ -16,6 +16,16 @@ export function sampleMessages() {
   ];
 }
 
+/** A multi-turn conversation. */
+export function sampleConversation() {
+  return [
+    { role: "system" as const, content: "You are a helpful assistant." },
+    { role: "user" as const, content: "Hello!" },
+    { role: "assistant" as const, content: "Hi there! How can I help you?" },
+    { role: "user" as const, content: "What is 2+2?" },
+  ];
+}
+
 /** A sample OpenAI format request. */
 export function openaiRequest() {
   return {
@@ -49,6 +59,16 @@ export function openaiResponse() {
       total_tokens: 30,
     },
   };
+}
+
+/** A sample xAI (Grok) chat completion response, OpenAI-shaped. */
+export function grokResponse() {
+  return { ...openaiResponse(), id: "chatcmpl-grok-123", model: "grok-3-mini" };
+}
+
+/** A sample DeepSeek chat completion response, OpenAI-shaped. */
+export function deepseekResponse() {
+  return { ...openaiResponse(), id: "chatcmpl-deepseek-123", model: "deepseek-chat" };
 }
 
 /** A queued fake HTTP reply: a JSON body and a status code. */

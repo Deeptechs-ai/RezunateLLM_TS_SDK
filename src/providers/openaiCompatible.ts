@@ -36,8 +36,13 @@ export abstract class OpenAICompatibleProvider extends BaseProvider {
     };
   }
 
-  getEndpoint(): string {
+  /** Chat endpoint path; providers override it when theirs differs. */
+  get chatEndpoint(): string {
     return OPENAI_CHAT_ENDPOINT;
+  }
+
+  getEndpoint(): string {
+    return this.chatEndpoint;
   }
 
   /** Pass-through — request is already in OpenAI format. */
