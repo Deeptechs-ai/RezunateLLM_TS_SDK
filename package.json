@@ -1,5 +1,5 @@
 {
-  "name": "@rezunate/llm-sdk",
+  "name": "rezunate-llm-sdk",
   "version": "0.0.0",
   "description": "Unified TypeScript SDK for chat completions across multiple AI providers",
   "license": "MIT",
