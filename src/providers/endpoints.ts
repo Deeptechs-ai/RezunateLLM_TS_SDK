@@ -9,6 +9,12 @@ export const ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1";
 export const ANTHROPIC_MESSAGES_ENDPOINT = "/messages";
 export const ANTHROPIC_DEFAULT_VERSION = "2023-06-01";
 
+// Google (Gemini)
+export const GOOGLE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
+export const GOOGLE_GENERATE_CONTENT_ENDPOINT = "/models/{model}:generateContent";
+export const GOOGLE_STREAM_GENERATE_CONTENT_ENDPOINT =
+  "/models/{model}:streamGenerateContent?alt=sse";
+
 // Grok (xAI) — OpenAI-compatible API
 export const GROK_BASE_URL = "https://api.x.ai/v1";
 export const GROK_CHAT_ENDPOINT = "/chat/completions";

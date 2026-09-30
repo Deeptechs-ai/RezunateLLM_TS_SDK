@@ -17,6 +17,7 @@ export {
   AnthropicProvider,
   BaseProvider,
   DeepSeekProvider,
+  GoogleProvider,
   GrokProvider,
   getProvider,
   listProviders,

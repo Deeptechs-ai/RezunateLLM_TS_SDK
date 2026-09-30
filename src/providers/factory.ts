@@ -7,6 +7,7 @@ import { Provider } from "../models";
 import { AnthropicProvider } from "./anthropicProvider";
 import type { BaseProvider, ProviderOptions } from "./base";
 import { DeepSeekProvider } from "./deepseekProvider";
+import { GoogleProvider } from "./googleProvider";
 import { GrokProvider } from "./grokProvider";
 import { OpenAIProvider } from "./openaiProvider";
 
@@ -53,6 +54,17 @@ export class AnthropicFactory extends ProviderFactory {
   }
 }
 
+/** Factory for creating Google (Gemini) provider instances. */
+export class GoogleFactory extends ProviderFactory {
+  get providerName(): Provider {
+    return Provider.GOOGLE;
+  }
+
+  createProvider(apiKey: string, kwargs: ProviderKwargs = {}): BaseProvider {
+    return new GoogleProvider({ ...kwargs, apiKey });
+  }
+}
+
 /** Factory for creating Grok (xAI) provider instances. */
 export class GrokFactory extends ProviderFactory {
   get providerName(): Provider {
@@ -79,6 +91,7 @@ export class DeepSeekFactory extends ProviderFactory {
 export const FACTORY_REGISTRY = new Map<string, ProviderFactory>([
   [Provider.OPENAI, new OpenAIFactory()],
   [Provider.ANTHROPIC, new AnthropicFactory()],
+  [Provider.GOOGLE, new GoogleFactory()],
   [Provider.GROK, new GrokFactory()],
   [Provider.DEEPSEEK, new DeepSeekFactory()],
 ]);

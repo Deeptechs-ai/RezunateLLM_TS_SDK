@@ -9,12 +9,14 @@ import {
   AnthropicFactory,
   DeepSeekFactory,
   FACTORY_REGISTRY,
+  GoogleFactory,
   GrokFactory,
   getFactory,
   OpenAIFactory,
   ProviderFactory,
   registerFactory,
 } from "../src/providers/factory";
+import { GoogleProvider } from "../src/providers/googleProvider";
 import { GrokProvider } from "../src/providers/grokProvider";
 import { OpenAIProvider } from "../src/providers/openaiProvider";
 import { mockApiKey } from "./fixtures";
@@ -46,6 +48,7 @@ describe("factory registry", () => {
   it("contains the ported providers", () => {
     expect(FACTORY_REGISTRY.has(Provider.OPENAI)).toBe(true);
     expect(FACTORY_REGISTRY.has(Provider.ANTHROPIC)).toBe(true);
+    expect(FACTORY_REGISTRY.has(Provider.GOOGLE)).toBe(true);
     expect(FACTORY_REGISTRY.has(Provider.GROK)).toBe(true);
     expect(FACTORY_REGISTRY.has(Provider.DEEPSEEK)).toBe(true);
   });
@@ -53,6 +56,7 @@ describe("factory registry", () => {
   it("contains factory instances, not classes", () => {
     expect(FACTORY_REGISTRY.get(Provider.OPENAI)).toBeInstanceOf(OpenAIFactory);
     expect(FACTORY_REGISTRY.get(Provider.ANTHROPIC)).toBeInstanceOf(AnthropicFactory);
+    expect(FACTORY_REGISTRY.get(Provider.GOOGLE)).toBeInstanceOf(GoogleFactory);
     expect(FACTORY_REGISTRY.get(Provider.GROK)).toBeInstanceOf(GrokFactory);
     expect(FACTORY_REGISTRY.get(Provider.DEEPSEEK)).toBeInstanceOf(DeepSeekFactory);
   });
@@ -65,6 +69,10 @@ describe("getFactory", () => {
 
   it("returns the Anthropic factory", () => {
     expect(getFactory(Provider.ANTHROPIC)).toBeInstanceOf(AnthropicFactory);
+  });
+
+  it("returns the Google factory", () => {
+    expect(getFactory(Provider.GOOGLE)).toBeInstanceOf(GoogleFactory);
   });
 
   it("returns the Grok factory", () => {
@@ -158,6 +166,25 @@ describe("AnthropicFactory", () => {
 
     expect(provider.maxRetries).toBe(10);
     expect(provider.retryDelay).toBe(2.0);
+  });
+});
+
+describe("GoogleFactory", () => {
+  it("returns the correct provider name", () => {
+    expect(new GoogleFactory().providerName).toBe(Provider.GOOGLE);
+  });
+
+  it("creates a Google provider", () => {
+    const provider = new GoogleFactory().createProvider(mockApiKey);
+
+    expect(provider).toBeInstanceOf(GoogleProvider);
+    expect(provider.apiKey).toBe(mockApiKey);
+  });
+
+  it("passes settings to the provider", () => {
+    const provider = new GoogleFactory().createProvider(mockApiKey, { timeout: 120.0 });
+
+    expect(provider.timeout).toBe(120.0);
   });
 });
 

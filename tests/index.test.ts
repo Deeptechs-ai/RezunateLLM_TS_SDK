@@ -12,6 +12,7 @@ describe("package entry point", () => {
         "ChatCompletionRequestSchema",
         "ChatCompletionResponseSchema",
         "DeepSeekProvider",
+        "GoogleProvider",
         "GrokProvider",
         "MessageSchema",
         "OpenAIProvider",

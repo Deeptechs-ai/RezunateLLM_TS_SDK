@@ -5,6 +5,7 @@ import { chatComplete, getAvailableProviders } from "../src/gateway";
 import {
   anthropicResponse,
   deepseekResponse,
+  googleResponse,
   grokResponse,
   mockApiKey,
   mockFetch,
@@ -48,6 +49,22 @@ describe("chatComplete", () => {
     expect(result.provider).toBe("anthropic");
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(String(fetch.mock.calls[0]?.[0])).toBe("https://api.anthropic.com/v1/messages");
+  });
+
+  it("routes to the Google provider", async () => {
+    const fetch = mockFetch({ json: googleResponse() });
+
+    const result = await chatComplete({
+      provider: "google",
+      apiKey: mockApiKey,
+      request: { model: "gemini-2.0-flash", messages: sampleMessages() },
+    });
+
+    expect(result.provider).toBe("google");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(String(fetch.mock.calls[0]?.[0])).toBe(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+    );
   });
 
   it("routes to the Grok provider", async () => {
@@ -158,6 +175,7 @@ describe("getAvailableProviders", () => {
     const providers = getAvailableProviders();
     expect(providers).toContain("openai");
     expect(providers).toContain("anthropic");
+    expect(providers).toContain("google");
     expect(providers).toContain("grok");
     expect(providers).toContain("deepseek");
   });

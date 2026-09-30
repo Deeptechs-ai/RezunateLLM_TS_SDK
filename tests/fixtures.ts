@@ -74,6 +74,26 @@ export function anthropicResponse() {
   };
 }
 
+/** A sample Google Gemini API response. */
+export function googleResponse() {
+  return {
+    candidates: [
+      {
+        content: {
+          parts: [{ text: "Hello! How can I assist you today?" }],
+          role: "model",
+        },
+        finishReason: "STOP",
+      },
+    ],
+    usageMetadata: {
+      promptTokenCount: 10,
+      candidatesTokenCount: 20,
+      totalTokenCount: 30,
+    },
+  };
+}
+
 /** A sample xAI (Grok) chat completion response, OpenAI-shaped. */
 export function grokResponse() {
   return { ...openaiResponse(), id: "chatcmpl-grok-123", model: "grok-3-mini" };

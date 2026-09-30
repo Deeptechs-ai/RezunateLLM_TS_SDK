@@ -13,6 +13,7 @@ export {
   AnthropicFactory,
   DeepSeekFactory,
   FACTORY_REGISTRY,
+  GoogleFactory,
   GrokFactory,
   getFactory,
   OpenAIFactory,
@@ -20,6 +21,7 @@ export {
   type ProviderKwargs,
   registerFactory,
 } from "./factory";
+export { GoogleProvider } from "./googleProvider";
 export { GrokProvider } from "./grokProvider";
 export { OpenAIProvider } from "./openaiProvider";
 
