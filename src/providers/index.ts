@@ -6,9 +6,11 @@
 import type { BaseProvider } from "./base";
 import { FACTORY_REGISTRY, getFactory, type ProviderKwargs } from "./factory";
 
+export { AnthropicProvider } from "./anthropicProvider";
 export { BaseProvider, type ProviderOptions } from "./base";
 export { DeepSeekProvider } from "./deepseekProvider";
 export {
+  AnthropicFactory,
   DeepSeekFactory,
   FACTORY_REGISTRY,
   GrokFactory,

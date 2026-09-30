@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { chatComplete, getAvailableProviders } from "../src/gateway";
 import {
+  anthropicResponse,
   deepseekResponse,
   grokResponse,
   mockApiKey,
@@ -33,6 +34,20 @@ describe("chatComplete", () => {
     expect(result.provider).toBe("openai");
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(String(fetch.mock.calls[0]?.[0])).toBe("https://api.openai.com/v1/chat/completions");
+  });
+
+  it("routes to the Anthropic provider", async () => {
+    const fetch = mockFetch({ json: anthropicResponse() });
+
+    const result = await chatComplete({
+      provider: "anthropic",
+      apiKey: mockApiKey,
+      request: { model: "claude-sonnet-4-20250514", messages: sampleMessages(), max_tokens: 100 },
+    });
+
+    expect(result.provider).toBe("anthropic");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(String(fetch.mock.calls[0]?.[0])).toBe("https://api.anthropic.com/v1/messages");
   });
 
   it("routes to the Grok provider", async () => {
@@ -116,13 +131,13 @@ describe("chatComplete", () => {
     ).rejects.toThrow("Unknown provider");
   });
 
-  it("returns the response in OpenAI format", async () => {
-    mockFetch({ json: openaiResponse() });
+  it("returns the response in OpenAI format regardless of provider", async () => {
+    mockFetch({ json: anthropicResponse() });
 
     const result = await chatComplete({
-      provider: "openai",
+      provider: "anthropic",
       apiKey: mockApiKey,
-      request: { model: "gpt-4", messages: sampleMessages() },
+      request: { model: "claude-sonnet-4-20250514", messages: sampleMessages(), max_tokens: 100 },
     });
 
     expect(result.id).not.toBeNull();
@@ -142,6 +157,7 @@ describe("getAvailableProviders", () => {
   it("contains the ported providers", () => {
     const providers = getAvailableProviders();
     expect(providers).toContain("openai");
+    expect(providers).toContain("anthropic");
     expect(providers).toContain("grok");
     expect(providers).toContain("deepseek");
   });

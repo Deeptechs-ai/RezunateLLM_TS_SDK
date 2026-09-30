@@ -7,6 +7,7 @@ describe("package entry point", () => {
   it("exports the public API ported so far", () => {
     expect(Object.keys(sdk).sort()).toEqual(
       [
+        "AnthropicProvider",
         "BaseProvider",
         "ChatCompletionRequestSchema",
         "ChatCompletionResponseSchema",

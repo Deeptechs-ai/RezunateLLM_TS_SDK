@@ -61,6 +61,19 @@ export function openaiResponse() {
   };
 }
 
+/** A sample Anthropic API response. */
+export function anthropicResponse() {
+  return {
+    id: "msg_01XFDUDYJgAACzvnptvVoYEL",
+    type: "message",
+    role: "assistant",
+    content: [{ type: "text", text: "Hello! How can I assist you today?" }],
+    model: "claude-sonnet-4-20250514",
+    stop_reason: "end_turn",
+    usage: { input_tokens: 10, output_tokens: 20 },
+  };
+}
+
 /** A sample xAI (Grok) chat completion response, OpenAI-shaped. */
 export function grokResponse() {
   return { ...openaiResponse(), id: "chatcmpl-grok-123", model: "grok-3-mini" };

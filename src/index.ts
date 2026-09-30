@@ -14,6 +14,7 @@ export {
   MessageSchema,
 } from "./models";
 export {
+  AnthropicProvider,
   BaseProvider,
   DeepSeekProvider,
   GrokProvider,

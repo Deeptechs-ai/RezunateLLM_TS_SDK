@@ -4,6 +4,11 @@
 export const OPENAI_BASE_URL = "https://api.openai.com/v1";
 export const OPENAI_CHAT_ENDPOINT = "/chat/completions";
 
+// Anthropic
+export const ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1";
+export const ANTHROPIC_MESSAGES_ENDPOINT = "/messages";
+export const ANTHROPIC_DEFAULT_VERSION = "2023-06-01";
+
 // Grok (xAI) — OpenAI-compatible API
 export const GROK_BASE_URL = "https://api.x.ai/v1";
 export const GROK_CHAT_ENDPOINT = "/chat/completions";

@@ -4,6 +4,8 @@
 export const CONTENT_TYPE_HEADER = "Content-Type";
 export const APPLICATION_JSON = "application/json";
 export const AUTHORIZATION_HEADER = "Authorization";
+export const API_KEY_HEADER = "x-api-key";
+export const ANTHROPIC_VERSION_HEADER = "anthropic-version";
 
 // Retry Configuration
 export const DEFAULT_MAX_RETRIES = 3;

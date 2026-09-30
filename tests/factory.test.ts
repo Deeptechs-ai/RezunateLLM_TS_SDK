@@ -2,9 +2,11 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Provider } from "../src/models";
+import { AnthropicProvider } from "../src/providers/anthropicProvider";
 import type { BaseProvider } from "../src/providers/base";
 import { DeepSeekProvider } from "../src/providers/deepseekProvider";
 import {
+  AnthropicFactory,
   DeepSeekFactory,
   FACTORY_REGISTRY,
   GrokFactory,
@@ -43,12 +45,14 @@ afterEach(() => {
 describe("factory registry", () => {
   it("contains the ported providers", () => {
     expect(FACTORY_REGISTRY.has(Provider.OPENAI)).toBe(true);
+    expect(FACTORY_REGISTRY.has(Provider.ANTHROPIC)).toBe(true);
     expect(FACTORY_REGISTRY.has(Provider.GROK)).toBe(true);
     expect(FACTORY_REGISTRY.has(Provider.DEEPSEEK)).toBe(true);
   });
 
   it("contains factory instances, not classes", () => {
     expect(FACTORY_REGISTRY.get(Provider.OPENAI)).toBeInstanceOf(OpenAIFactory);
+    expect(FACTORY_REGISTRY.get(Provider.ANTHROPIC)).toBeInstanceOf(AnthropicFactory);
     expect(FACTORY_REGISTRY.get(Provider.GROK)).toBeInstanceOf(GrokFactory);
     expect(FACTORY_REGISTRY.get(Provider.DEEPSEEK)).toBeInstanceOf(DeepSeekFactory);
   });
@@ -57,6 +61,10 @@ describe("factory registry", () => {
 describe("getFactory", () => {
   it("returns the OpenAI factory", () => {
     expect(getFactory(Provider.OPENAI)).toBeInstanceOf(OpenAIFactory);
+  });
+
+  it("returns the Anthropic factory", () => {
+    expect(getFactory(Provider.ANTHROPIC)).toBeInstanceOf(AnthropicFactory);
   });
 
   it("returns the Grok factory", () => {
@@ -127,6 +135,29 @@ describe("OpenAIFactory", () => {
 
     expect(provider.maxRetries).toBe(5);
     expect(provider.timeout).toBe(120.0);
+  });
+});
+
+describe("AnthropicFactory", () => {
+  it("returns the correct provider name", () => {
+    expect(new AnthropicFactory().providerName).toBe(Provider.ANTHROPIC);
+  });
+
+  it("creates an Anthropic provider", () => {
+    const provider = new AnthropicFactory().createProvider(mockApiKey);
+
+    expect(provider).toBeInstanceOf(AnthropicProvider);
+    expect(provider.apiKey).toBe(mockApiKey);
+  });
+
+  it("passes settings to the provider", () => {
+    const provider = new AnthropicFactory().createProvider(mockApiKey, {
+      maxRetries: 10,
+      retryDelay: 2.0,
+    });
+
+    expect(provider.maxRetries).toBe(10);
+    expect(provider.retryDelay).toBe(2.0);
   });
 });
 
