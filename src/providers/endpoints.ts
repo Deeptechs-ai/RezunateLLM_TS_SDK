@@ -19,6 +19,10 @@ export const GOOGLE_STREAM_GENERATE_CONTENT_ENDPOINT =
 export const GROK_BASE_URL = "https://api.x.ai/v1";
 export const GROK_CHAT_ENDPOINT = "/chat/completions";
 
+// Llama (Meta) — native API with Meta-specific schema
+export const LLAMA_BASE_URL = "https://api.llama.com/v1";
+export const LLAMA_CHAT_ENDPOINT = "/chat/completions";
+
 // DeepSeek — OpenAI-compatible API
 export const DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1";
 export const DEEPSEEK_CHAT_ENDPOINT = "/chat/completions";

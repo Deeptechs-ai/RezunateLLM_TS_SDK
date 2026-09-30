@@ -20,6 +20,7 @@ export {
   GoogleProvider,
   GrokProvider,
   getProvider,
+  LlamaProvider,
   listProviders,
   OpenAIProvider,
 } from "./providers";

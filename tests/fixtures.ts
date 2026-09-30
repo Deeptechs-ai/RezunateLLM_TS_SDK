@@ -94,6 +94,23 @@ export function googleResponse() {
   };
 }
 
+/** A sample Meta Llama (native) API response. */
+export function llamaResponse() {
+  return {
+    id: "msg-test-123",
+    completion_message: {
+      role: "assistant",
+      content: { type: "text", text: "Hello! How can I assist you today?" },
+      stop_reason: "stop",
+    },
+    metrics: [
+      { metric: "num_prompt_tokens", value: 10, unit: "tokens" },
+      { metric: "num_completion_tokens", value: 20, unit: "tokens" },
+      { metric: "num_total_tokens", value: 30, unit: "tokens" },
+    ],
+  };
+}
+
 /** A sample xAI (Grok) chat completion response, OpenAI-shaped. */
 export function grokResponse() {
   return { ...openaiResponse(), id: "chatcmpl-grok-123", model: "grok-3-mini" };

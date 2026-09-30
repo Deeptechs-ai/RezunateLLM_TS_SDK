@@ -12,3 +12,8 @@ export const ANTHROPIC_VERSION_HEADER = "anthropic-version";
 export const DEFAULT_MAX_RETRIES = 3;
 export const DEFAULT_RETRY_DELAY = 1.0; // seconds
 export const RETRYABLE_STATUS_CODES: ReadonlySet<number> = new Set([429, 500, 502, 503, 504]);
+
+// Llama (Meta) native API — well-known keys in the response `metrics` array
+export const LLAMA_METRIC_PROMPT_TOKENS = "num_prompt_tokens";
+export const LLAMA_METRIC_COMPLETION_TOKENS = "num_completion_tokens";
+export const LLAMA_METRIC_TOTAL_TOKENS = "num_total_tokens";

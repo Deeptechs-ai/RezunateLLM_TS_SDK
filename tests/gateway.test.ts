@@ -7,6 +7,7 @@ import {
   deepseekResponse,
   googleResponse,
   grokResponse,
+  llamaResponse,
   mockApiKey,
   mockFetch,
   openaiResponse,
@@ -79,6 +80,20 @@ describe("chatComplete", () => {
     expect(result.provider).toBe("grok");
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(String(fetch.mock.calls[0]?.[0])).toBe("https://api.x.ai/v1/chat/completions");
+  });
+
+  it("routes to the Llama provider", async () => {
+    const fetch = mockFetch({ json: llamaResponse() });
+
+    const result = await chatComplete({
+      provider: "llama",
+      apiKey: mockApiKey,
+      request: { model: "Llama-4-Maverick-17B-128E-Instruct-FP8", messages: sampleMessages() },
+    });
+
+    expect(result.provider).toBe("llama");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(String(fetch.mock.calls[0]?.[0])).toBe("https://api.llama.com/v1/chat/completions");
   });
 
   it("routes to the DeepSeek provider", async () => {
@@ -177,6 +192,7 @@ describe("getAvailableProviders", () => {
     expect(providers).toContain("anthropic");
     expect(providers).toContain("google");
     expect(providers).toContain("grok");
+    expect(providers).toContain("llama");
     expect(providers).toContain("deepseek");
   });
 

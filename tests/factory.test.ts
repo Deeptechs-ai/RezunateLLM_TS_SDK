@@ -12,12 +12,14 @@ import {
   GoogleFactory,
   GrokFactory,
   getFactory,
+  LlamaFactory,
   OpenAIFactory,
   ProviderFactory,
   registerFactory,
 } from "../src/providers/factory";
 import { GoogleProvider } from "../src/providers/googleProvider";
 import { GrokProvider } from "../src/providers/grokProvider";
+import { LlamaProvider } from "../src/providers/llamaProvider";
 import { OpenAIProvider } from "../src/providers/openaiProvider";
 import { mockApiKey } from "./fixtures";
 
@@ -50,6 +52,7 @@ describe("factory registry", () => {
     expect(FACTORY_REGISTRY.has(Provider.ANTHROPIC)).toBe(true);
     expect(FACTORY_REGISTRY.has(Provider.GOOGLE)).toBe(true);
     expect(FACTORY_REGISTRY.has(Provider.GROK)).toBe(true);
+    expect(FACTORY_REGISTRY.has(Provider.LLAMA)).toBe(true);
     expect(FACTORY_REGISTRY.has(Provider.DEEPSEEK)).toBe(true);
   });
 
@@ -58,6 +61,7 @@ describe("factory registry", () => {
     expect(FACTORY_REGISTRY.get(Provider.ANTHROPIC)).toBeInstanceOf(AnthropicFactory);
     expect(FACTORY_REGISTRY.get(Provider.GOOGLE)).toBeInstanceOf(GoogleFactory);
     expect(FACTORY_REGISTRY.get(Provider.GROK)).toBeInstanceOf(GrokFactory);
+    expect(FACTORY_REGISTRY.get(Provider.LLAMA)).toBeInstanceOf(LlamaFactory);
     expect(FACTORY_REGISTRY.get(Provider.DEEPSEEK)).toBeInstanceOf(DeepSeekFactory);
   });
 });
@@ -77,6 +81,10 @@ describe("getFactory", () => {
 
   it("returns the Grok factory", () => {
     expect(getFactory(Provider.GROK)).toBeInstanceOf(GrokFactory);
+  });
+
+  it("returns the Llama factory", () => {
+    expect(getFactory(Provider.LLAMA)).toBeInstanceOf(LlamaFactory);
   });
 
   it("returns the DeepSeek factory", () => {
@@ -208,6 +216,29 @@ describe("GrokFactory", () => {
 
     expect(provider.maxRetries).toBe(5);
     expect(provider.timeout).toBe(120.0);
+  });
+});
+
+describe("LlamaFactory", () => {
+  it("returns the correct provider name", () => {
+    expect(new LlamaFactory().providerName).toBe(Provider.LLAMA);
+  });
+
+  it("creates a Llama provider", () => {
+    const provider = new LlamaFactory().createProvider(mockApiKey);
+
+    expect(provider).toBeInstanceOf(LlamaProvider);
+    expect(provider.apiKey).toBe(mockApiKey);
+  });
+
+  it("passes settings to the provider", () => {
+    const provider = new LlamaFactory().createProvider(mockApiKey, {
+      maxRetries: 4,
+      timeout: 90.0,
+    });
+
+    expect(provider.maxRetries).toBe(4);
+    expect(provider.timeout).toBe(90.0);
   });
 });
 

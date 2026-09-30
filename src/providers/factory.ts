@@ -9,6 +9,7 @@ import type { BaseProvider, ProviderOptions } from "./base";
 import { DeepSeekProvider } from "./deepseekProvider";
 import { GoogleProvider } from "./googleProvider";
 import { GrokProvider } from "./grokProvider";
+import { LlamaProvider } from "./llamaProvider";
 import { OpenAIProvider } from "./openaiProvider";
 
 /** Provider settings other than the API key (Python `**kwargs`), e.g. retries and timeout. */
@@ -76,6 +77,17 @@ export class GrokFactory extends ProviderFactory {
   }
 }
 
+/** Factory for creating Llama (Meta) provider instances. */
+export class LlamaFactory extends ProviderFactory {
+  get providerName(): Provider {
+    return Provider.LLAMA;
+  }
+
+  createProvider(apiKey: string, kwargs: ProviderKwargs = {}): BaseProvider {
+    return new LlamaProvider({ ...kwargs, apiKey });
+  }
+}
+
 /** Factory for creating DeepSeek provider instances. */
 export class DeepSeekFactory extends ProviderFactory {
   get providerName(): Provider {
@@ -93,6 +105,7 @@ export const FACTORY_REGISTRY = new Map<string, ProviderFactory>([
   [Provider.ANTHROPIC, new AnthropicFactory()],
   [Provider.GOOGLE, new GoogleFactory()],
   [Provider.GROK, new GrokFactory()],
+  [Provider.LLAMA, new LlamaFactory()],
   [Provider.DEEPSEEK, new DeepSeekFactory()],
 ]);
 
