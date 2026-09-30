@@ -23,4 +23,5 @@ export {
   LlamaProvider,
   listProviders,
   OpenAIProvider,
+  QwenProvider,
 } from "./providers";

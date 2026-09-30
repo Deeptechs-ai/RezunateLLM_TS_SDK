@@ -111,6 +111,22 @@ export function llamaResponse() {
   };
 }
 
+/** A sample DashScope (native Qwen) API response. */
+export function qwenResponse() {
+  return {
+    output: {
+      choices: [
+        {
+          finish_reason: "stop",
+          message: { role: "assistant", content: "Hello! How can I assist you today?" },
+        },
+      ],
+    },
+    usage: { input_tokens: 10, output_tokens: 20, total_tokens: 30 },
+    request_id: "req-test-123",
+  };
+}
+
 /** A sample xAI (Grok) chat completion response, OpenAI-shaped. */
 export function grokResponse() {
   return { ...openaiResponse(), id: "chatcmpl-grok-123", model: "grok-3-mini" };

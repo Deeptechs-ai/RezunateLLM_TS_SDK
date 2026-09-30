@@ -20,12 +20,14 @@ export {
   OpenAIFactory,
   ProviderFactory,
   type ProviderKwargs,
+  QwenFactory,
   registerFactory,
 } from "./factory";
 export { GoogleProvider } from "./googleProvider";
 export { GrokProvider } from "./grokProvider";
 export { LlamaProvider } from "./llamaProvider";
 export { OpenAIProvider } from "./openaiProvider";
+export { QwenProvider } from "./qwenProvider";
 
 /**
  * Get a provider instance by name, e.g. `getProvider("openai", apiKey)`.

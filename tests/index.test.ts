@@ -17,6 +17,7 @@ describe("package entry point", () => {
         "LlamaProvider",
         "MessageSchema",
         "OpenAIProvider",
+        "QwenProvider",
         "chatComplete",
         "getAvailableProviders",
         "getProvider",

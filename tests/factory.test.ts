@@ -15,12 +15,14 @@ import {
   LlamaFactory,
   OpenAIFactory,
   ProviderFactory,
+  QwenFactory,
   registerFactory,
 } from "../src/providers/factory";
 import { GoogleProvider } from "../src/providers/googleProvider";
 import { GrokProvider } from "../src/providers/grokProvider";
 import { LlamaProvider } from "../src/providers/llamaProvider";
 import { OpenAIProvider } from "../src/providers/openaiProvider";
+import { QwenProvider } from "../src/providers/qwenProvider";
 import { mockApiKey } from "./fixtures";
 
 /** A factory used to test registering; creates OpenAI providers. */
@@ -47,13 +49,14 @@ afterEach(() => {
 });
 
 describe("factory registry", () => {
-  it("contains the ported providers", () => {
+  it("contains all providers", () => {
     expect(FACTORY_REGISTRY.has(Provider.OPENAI)).toBe(true);
     expect(FACTORY_REGISTRY.has(Provider.ANTHROPIC)).toBe(true);
     expect(FACTORY_REGISTRY.has(Provider.GOOGLE)).toBe(true);
     expect(FACTORY_REGISTRY.has(Provider.GROK)).toBe(true);
     expect(FACTORY_REGISTRY.has(Provider.LLAMA)).toBe(true);
     expect(FACTORY_REGISTRY.has(Provider.DEEPSEEK)).toBe(true);
+    expect(FACTORY_REGISTRY.has(Provider.QWEN)).toBe(true);
   });
 
   it("contains factory instances, not classes", () => {
@@ -63,6 +66,7 @@ describe("factory registry", () => {
     expect(FACTORY_REGISTRY.get(Provider.GROK)).toBeInstanceOf(GrokFactory);
     expect(FACTORY_REGISTRY.get(Provider.LLAMA)).toBeInstanceOf(LlamaFactory);
     expect(FACTORY_REGISTRY.get(Provider.DEEPSEEK)).toBeInstanceOf(DeepSeekFactory);
+    expect(FACTORY_REGISTRY.get(Provider.QWEN)).toBeInstanceOf(QwenFactory);
   });
 });
 
@@ -89,6 +93,10 @@ describe("getFactory", () => {
 
   it("returns the DeepSeek factory", () => {
     expect(getFactory(Provider.DEEPSEEK)).toBeInstanceOf(DeepSeekFactory);
+  });
+
+  it("returns the Qwen factory", () => {
+    expect(getFactory(Provider.QWEN)).toBeInstanceOf(QwenFactory);
   });
 
   it("ignores the case of the name", () => {
@@ -262,6 +270,29 @@ describe("DeepSeekFactory", () => {
 
     expect(provider.maxRetries).toBe(2);
     expect(provider.timeout).toBe(45.0);
+  });
+});
+
+describe("QwenFactory", () => {
+  it("returns the correct provider name", () => {
+    expect(new QwenFactory().providerName).toBe(Provider.QWEN);
+  });
+
+  it("creates a Qwen provider", () => {
+    const provider = new QwenFactory().createProvider(mockApiKey);
+
+    expect(provider).toBeInstanceOf(QwenProvider);
+    expect(provider.apiKey).toBe(mockApiKey);
+  });
+
+  it("passes settings to the provider", () => {
+    const provider = new QwenFactory().createProvider(mockApiKey, {
+      maxRetries: 3,
+      timeout: 60.0,
+    });
+
+    expect(provider.maxRetries).toBe(3);
+    expect(provider.timeout).toBe(60.0);
   });
 });
 

@@ -27,6 +27,10 @@ export const LLAMA_CHAT_ENDPOINT = "/chat/completions";
 export const DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1";
 export const DEEPSEEK_CHAT_ENDPOINT = "/chat/completions";
 
+// Qwen (Alibaba DashScope) — native API (Singapore international region)
+export const QWEN_BASE_URL = "https://dashscope-intl.aliyuncs.com/api/v1";
+export const QWEN_GENERATION_ENDPOINT = "/services/aigc/text-generation/generation";
+
 /**
  * Robustly join baseUrl and endpoint.
  * Handles trailing/leading slashes and fills in `{model}` in the endpoint.

@@ -11,6 +11,7 @@ import { GoogleProvider } from "./googleProvider";
 import { GrokProvider } from "./grokProvider";
 import { LlamaProvider } from "./llamaProvider";
 import { OpenAIProvider } from "./openaiProvider";
+import { QwenProvider } from "./qwenProvider";
 
 /** Provider settings other than the API key (Python `**kwargs`), e.g. retries and timeout. */
 export type ProviderKwargs = Omit<ProviderOptions, "apiKey">;
@@ -99,6 +100,17 @@ export class DeepSeekFactory extends ProviderFactory {
   }
 }
 
+/** Factory for creating Qwen (Alibaba) provider instances. */
+export class QwenFactory extends ProviderFactory {
+  get providerName(): Provider {
+    return Provider.QWEN;
+  }
+
+  createProvider(apiKey: string, kwargs: ProviderKwargs = {}): BaseProvider {
+    return new QwenProvider({ ...kwargs, apiKey });
+  }
+}
+
 /** Factory registry: maps provider names to factory instances. */
 export const FACTORY_REGISTRY = new Map<string, ProviderFactory>([
   [Provider.OPENAI, new OpenAIFactory()],
@@ -107,6 +119,7 @@ export const FACTORY_REGISTRY = new Map<string, ProviderFactory>([
   [Provider.GROK, new GrokFactory()],
   [Provider.LLAMA, new LlamaFactory()],
   [Provider.DEEPSEEK, new DeepSeekFactory()],
+  [Provider.QWEN, new QwenFactory()],
 ]);
 
 const PROVIDER_VALUES: readonly string[] = Object.values(Provider);

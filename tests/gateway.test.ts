@@ -11,6 +11,7 @@ import {
   mockApiKey,
   mockFetch,
   openaiResponse,
+  qwenResponse,
   sampleMessages,
 } from "./fixtures";
 
@@ -110,6 +111,22 @@ describe("chatComplete", () => {
     expect(String(fetch.mock.calls[0]?.[0])).toBe("https://api.deepseek.com/v1/chat/completions");
   });
 
+  it("routes to the Qwen provider", async () => {
+    const fetch = mockFetch({ json: qwenResponse() });
+
+    const result = await chatComplete({
+      provider: "qwen",
+      apiKey: mockApiKey,
+      request: { model: "qwen-plus", messages: sampleMessages() },
+    });
+
+    expect(result.provider).toBe("qwen");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(String(fetch.mock.calls[0]?.[0])).toBe(
+      "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
+    );
+  });
+
   it("passes temperature to the provider", async () => {
     const fetch = mockFetch({ json: openaiResponse() });
 
@@ -186,7 +203,7 @@ describe("getAvailableProviders", () => {
     expect(Array.isArray(getAvailableProviders())).toBe(true);
   });
 
-  it("contains the ported providers", () => {
+  it("contains all providers", () => {
     const providers = getAvailableProviders();
     expect(providers).toContain("openai");
     expect(providers).toContain("anthropic");
@@ -194,9 +211,14 @@ describe("getAvailableProviders", () => {
     expect(providers).toContain("grok");
     expect(providers).toContain("llama");
     expect(providers).toContain("deepseek");
+    expect(providers).toContain("qwen");
   });
 
   it("returns at least three providers", () => {
     expect(getAvailableProviders().length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("returns all seven providers", () => {
+    expect(getAvailableProviders()).toHaveLength(7);
   });
 });
