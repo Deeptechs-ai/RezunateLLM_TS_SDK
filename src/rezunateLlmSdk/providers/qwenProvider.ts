@@ -15,15 +15,18 @@ import {
   Role,
 } from "../models";
 import { BaseProvider } from "./base";
-import { QWEN_BASE_URL, QWEN_GENERATION_ENDPOINT } from "./endpoints";
+import { QWEN_BASE_URL, QWEN_GENERATION_ENDPOINT, QWEN_WORKSPACE_BASE_URL } from "./endpoints";
 import { type QwenRequest, QwenRequestSchema, QwenResponseSchema } from "./qwenModels";
 
 /** Qwen provider against Alibaba DashScope's native generation API. */
 export class QwenProvider extends BaseProvider {
   protected override readonly responseModel = QwenResponseSchema;
 
+  /** The workspace-specific domain when a workspace is set, otherwise the default domain. */
   get baseUrl(): string {
-    return QWEN_BASE_URL;
+    return this.workspaceId
+      ? QWEN_WORKSPACE_BASE_URL.replace("{workspaceId}", this.workspaceId)
+      : QWEN_BASE_URL;
   }
 
   get providerName(): Provider {

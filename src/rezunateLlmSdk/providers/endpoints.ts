@@ -29,6 +29,9 @@ export const DEEPSEEK_CHAT_ENDPOINT = "/chat/completions";
 
 // Qwen (Alibaba DashScope) — native API (Singapore international region)
 export const QWEN_BASE_URL = "https://dashscope-intl.aliyuncs.com/api/v1";
+/** Workspace-specific domain, used with a key created in that (sub-)workspace. */
+export const QWEN_WORKSPACE_BASE_URL =
+  "https://{workspaceId}.ap-southeast-1.maas.aliyuncs.com/api/v1";
 export const QWEN_GENERATION_ENDPOINT = "/services/aigc/text-generation/generation";
 
 /**

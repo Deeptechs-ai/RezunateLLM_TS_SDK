@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import OpenAI, { type ClientOptions } from "openai";
 import type { ChatCompletionCreateParamsNonStreaming } from "openai/resources/chat/completions";
 import * as constants from "../constants";
 import type { ChatCompletionRequest, ChatCompletionResponse } from "../models";
@@ -24,8 +24,17 @@ export abstract class OpenAICompatibleProvider extends BaseProvider {
       apiKey: this.apiKey,
       baseURL: this.baseUrl,
       maxRetries: this.maxRetries,
+      ...this.extraClientOptions(),
     });
     return this.cachedClient;
+  }
+
+  /**
+   * Extra options for the OpenAI SDK client. None by default, so OpenAI-only settings
+   * (organization, project) are never sent to other providers; OpenAI overrides this.
+   */
+  protected extraClientOptions(): Partial<ClientOptions> {
+    return {};
   }
 
   /** Default Bearer-token auth. Override if a provider uses something else. */

@@ -16,6 +16,15 @@ export interface ProviderOptions {
   timeout?: number;
   /** Accepted for parity with the Python `**kwargs`; providers may ignore it. */
   model?: string;
+  /** OpenAI organization ID, for keys that belong to several organizations. Used by OpenAI only. */
+  organization?: string;
+  /** OpenAI project ID, for keys that access several projects. Used by OpenAI only. */
+  project?: string;
+  /**
+   * Workspace ID for organization-level keys.
+   * Anthropic sends it as a header; Qwen uses it in the workspace URL. Other providers ignore it.
+   */
+  workspaceId?: string;
 }
 
 /** Raised for a non-2xx HTTP response, carrying the status code (like `requests.HTTPError`). */
@@ -85,6 +94,9 @@ export abstract class BaseProvider {
   readonly maxRetries: number;
   readonly retryDelay: number;
   readonly timeout: number;
+  readonly organization: string | null;
+  readonly project: string | null;
+  readonly workspaceId: string | null;
 
   /** When set, raw provider responses are validated with this schema. */
   protected readonly responseModel: z.ZodType | null = null;
@@ -98,6 +110,9 @@ export abstract class BaseProvider {
     this.maxRetries = options.maxRetries ?? constants.DEFAULT_MAX_RETRIES;
     this.retryDelay = options.retryDelay ?? constants.DEFAULT_RETRY_DELAY;
     this.timeout = options.timeout ?? 60.0;
+    this.organization = options.organization ?? null;
+    this.project = options.project ?? null;
+    this.workspaceId = options.workspaceId ?? null;
   }
 
   /** Return the base URL for the provider's API. */

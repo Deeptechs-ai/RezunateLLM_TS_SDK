@@ -12,6 +12,12 @@ export interface ChatCompleteOptions {
   provider: string;
   apiKey: string;
   request: ChatCompletionRequest;
+  /** OpenAI organization ID (OpenAI only), for keys that belong to several organizations. */
+  organization?: string;
+  /** OpenAI project ID (OpenAI only), for keys that access several projects. */
+  project?: string;
+  /** Workspace ID for organization-level keys (Anthropic and Qwen). */
+  workspaceId?: string;
 }
 
 /**
@@ -25,7 +31,12 @@ export async function chatComplete(options: ChatCompleteOptions): Promise<ChatCo
     throw new Error("Streaming is not supported yet");
   }
 
-  const providerInstance = getProvider(options.provider, options.apiKey, { model: request.model });
+  const providerInstance = getProvider(options.provider, options.apiKey, {
+    model: request.model,
+    organization: options.organization,
+    project: options.project,
+    workspaceId: options.workspaceId,
+  });
   return providerInstance.chatComplete(request);
 }
 

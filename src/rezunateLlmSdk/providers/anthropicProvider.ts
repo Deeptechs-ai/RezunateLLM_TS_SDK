@@ -38,11 +38,13 @@ export class AnthropicProvider extends BaseProvider {
     return Provider.ANTHROPIC;
   }
 
+  /** Adds `anthropic-workspace-id` when a workspace is set (needed for organization-level keys). */
   getHeaders(): Record<string, string> {
     return {
       [constants.API_KEY_HEADER]: this.apiKey,
       [constants.CONTENT_TYPE_HEADER]: constants.APPLICATION_JSON,
       [constants.ANTHROPIC_VERSION_HEADER]: ANTHROPIC_DEFAULT_VERSION,
+      ...(this.workspaceId ? { [constants.ANTHROPIC_WORKSPACE_HEADER]: this.workspaceId } : {}),
     };
   }
 
