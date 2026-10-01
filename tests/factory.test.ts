@@ -12,7 +12,7 @@ import {
   GoogleFactory,
   GrokFactory,
   getFactory,
-  LlamaFactory,
+  MetaFactory,
   OpenAIFactory,
   ProviderFactory,
   QwenFactory,
@@ -20,7 +20,7 @@ import {
 } from "../src/rezunateLlmSdk/providers/factory";
 import { GoogleProvider } from "../src/rezunateLlmSdk/providers/googleProvider";
 import { GrokProvider } from "../src/rezunateLlmSdk/providers/grokProvider";
-import { LlamaProvider } from "../src/rezunateLlmSdk/providers/llamaProvider";
+import { MetaProvider } from "../src/rezunateLlmSdk/providers/metaProvider";
 import { OpenAIProvider } from "../src/rezunateLlmSdk/providers/openaiProvider";
 import { QwenProvider } from "../src/rezunateLlmSdk/providers/qwenProvider";
 import { mockApiKey } from "./fixtures";
@@ -54,7 +54,7 @@ describe("factory registry", () => {
     expect(FACTORY_REGISTRY.has(Provider.ANTHROPIC)).toBe(true);
     expect(FACTORY_REGISTRY.has(Provider.GOOGLE)).toBe(true);
     expect(FACTORY_REGISTRY.has(Provider.GROK)).toBe(true);
-    expect(FACTORY_REGISTRY.has(Provider.LLAMA)).toBe(true);
+    expect(FACTORY_REGISTRY.has(Provider.META)).toBe(true);
     expect(FACTORY_REGISTRY.has(Provider.DEEPSEEK)).toBe(true);
     expect(FACTORY_REGISTRY.has(Provider.QWEN)).toBe(true);
   });
@@ -64,7 +64,7 @@ describe("factory registry", () => {
     expect(FACTORY_REGISTRY.get(Provider.ANTHROPIC)).toBeInstanceOf(AnthropicFactory);
     expect(FACTORY_REGISTRY.get(Provider.GOOGLE)).toBeInstanceOf(GoogleFactory);
     expect(FACTORY_REGISTRY.get(Provider.GROK)).toBeInstanceOf(GrokFactory);
-    expect(FACTORY_REGISTRY.get(Provider.LLAMA)).toBeInstanceOf(LlamaFactory);
+    expect(FACTORY_REGISTRY.get(Provider.META)).toBeInstanceOf(MetaFactory);
     expect(FACTORY_REGISTRY.get(Provider.DEEPSEEK)).toBeInstanceOf(DeepSeekFactory);
     expect(FACTORY_REGISTRY.get(Provider.QWEN)).toBeInstanceOf(QwenFactory);
   });
@@ -87,8 +87,8 @@ describe("getFactory", () => {
     expect(getFactory(Provider.GROK)).toBeInstanceOf(GrokFactory);
   });
 
-  it("returns the Llama factory", () => {
-    expect(getFactory(Provider.LLAMA)).toBeInstanceOf(LlamaFactory);
+  it("returns the Meta factory", () => {
+    expect(getFactory(Provider.META)).toBeInstanceOf(MetaFactory);
   });
 
   it("returns the DeepSeek factory", () => {
@@ -227,20 +227,20 @@ describe("GrokFactory", () => {
   });
 });
 
-describe("LlamaFactory", () => {
+describe("MetaFactory", () => {
   it("returns the correct provider name", () => {
-    expect(new LlamaFactory().providerName).toBe(Provider.LLAMA);
+    expect(new MetaFactory().providerName).toBe(Provider.META);
   });
 
-  it("creates a Llama provider", () => {
-    const provider = new LlamaFactory().createProvider(mockApiKey);
+  it("creates a Meta provider", () => {
+    const provider = new MetaFactory().createProvider(mockApiKey);
 
-    expect(provider).toBeInstanceOf(LlamaProvider);
+    expect(provider).toBeInstanceOf(MetaProvider);
     expect(provider.apiKey).toBe(mockApiKey);
   });
 
   it("passes settings to the provider", () => {
-    const provider = new LlamaFactory().createProvider(mockApiKey, {
+    const provider = new MetaFactory().createProvider(mockApiKey, {
       maxRetries: 4,
       timeout: 90.0,
     });

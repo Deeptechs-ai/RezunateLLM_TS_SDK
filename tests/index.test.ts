@@ -14,7 +14,7 @@ describe("package entry point", () => {
         "DeepSeekProvider",
         "GoogleProvider",
         "GrokProvider",
-        "LlamaProvider",
+        "MetaProvider",
         "MessageSchema",
         "OpenAIProvider",
         "QwenProvider",

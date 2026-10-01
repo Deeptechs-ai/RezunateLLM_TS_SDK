@@ -94,23 +94,6 @@ export function googleResponse() {
   };
 }
 
-/** A sample Meta Llama (native) API response. */
-export function llamaResponse() {
-  return {
-    id: "msg-test-123",
-    completion_message: {
-      role: "assistant",
-      content: { type: "text", text: "Hello! How can I assist you today?" },
-      stop_reason: "stop",
-    },
-    metrics: [
-      { metric: "num_prompt_tokens", value: 10, unit: "tokens" },
-      { metric: "num_completion_tokens", value: 20, unit: "tokens" },
-      { metric: "num_total_tokens", value: 30, unit: "tokens" },
-    ],
-  };
-}
-
 /** A sample DashScope (native Qwen) API response. */
 export function qwenResponse() {
   return {
@@ -130,6 +113,36 @@ export function qwenResponse() {
 /** A sample xAI (Grok) chat completion response, OpenAI-shaped. */
 export function grokResponse() {
   return { ...openaiResponse(), id: "chatcmpl-grok-123", model: "grok-3-mini" };
+}
+
+/**
+ * A sample Meta Model API (Muse Spark) response, OpenAI-shaped.
+ * Includes Meta-only fields (`reasoning_content`, token details) that our models drop.
+ */
+export function metaResponse() {
+  const base = openaiResponse();
+  return {
+    ...base,
+    id: "chatcmpl-meta-123",
+    model: "muse-spark-1.3",
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: "assistant",
+          content: "Hello! How can I assist you today?",
+          refusal: null,
+          reasoning_content: "The user greeted me.",
+        },
+        finish_reason: "stop",
+      },
+    ],
+    usage: {
+      ...base.usage,
+      prompt_tokens_details: { cached_tokens: 0 },
+      completion_tokens_details: { reasoning_tokens: 5 },
+    },
+  };
 }
 
 /** A sample DeepSeek chat completion response, OpenAI-shaped. */

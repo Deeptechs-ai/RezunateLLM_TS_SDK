@@ -9,7 +9,7 @@ import type { BaseProvider, ProviderOptions } from "./base";
 import { DeepSeekProvider } from "./deepseekProvider";
 import { GoogleProvider } from "./googleProvider";
 import { GrokProvider } from "./grokProvider";
-import { LlamaProvider } from "./llamaProvider";
+import { MetaProvider } from "./metaProvider";
 import { OpenAIProvider } from "./openaiProvider";
 import { QwenProvider } from "./qwenProvider";
 
@@ -78,14 +78,14 @@ export class GrokFactory extends ProviderFactory {
   }
 }
 
-/** Factory for creating Llama (Meta) provider instances. */
-export class LlamaFactory extends ProviderFactory {
+/** Factory for creating Meta (Muse Spark) provider instances. */
+export class MetaFactory extends ProviderFactory {
   get providerName(): Provider {
-    return Provider.LLAMA;
+    return Provider.META;
   }
 
   createProvider(apiKey: string, kwargs: ProviderKwargs = {}): BaseProvider {
-    return new LlamaProvider({ ...kwargs, apiKey });
+    return new MetaProvider({ ...kwargs, apiKey });
   }
 }
 
@@ -117,7 +117,7 @@ export const FACTORY_REGISTRY = new Map<string, ProviderFactory>([
   [Provider.ANTHROPIC, new AnthropicFactory()],
   [Provider.GOOGLE, new GoogleFactory()],
   [Provider.GROK, new GrokFactory()],
-  [Provider.LLAMA, new LlamaFactory()],
+  [Provider.META, new MetaFactory()],
   [Provider.DEEPSEEK, new DeepSeekFactory()],
   [Provider.QWEN, new QwenFactory()],
 ]);

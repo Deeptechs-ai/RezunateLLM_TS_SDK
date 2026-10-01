@@ -16,7 +16,7 @@ export const Provider = {
   ANTHROPIC: "anthropic",
   GOOGLE: "google",
   GROK: "grok",
-  LLAMA: "llama",
+  META: "meta",
   DEEPSEEK: "deepseek",
   QWEN: "qwen",
 } as const;
@@ -46,7 +46,7 @@ export const FinishReasonSchema = z.enum(FinishReason);
 /** Centralized mapping for all provider-specific finish reasons. */
 export const FINISH_REASON_MAP: Readonly<Record<string, FinishReason>> = {
   // OpenAI-style values — also emitted by xAI (Grok), DeepSeek,
-  // Qwen native (DashScope, result_format="message"), and Llama native (Meta).
+  // Meta (Muse Spark), and Qwen native (DashScope, result_format="message").
   stop: FinishReason.STOP,
   length: FinishReason.LENGTH,
   content_filter: FinishReason.CONTENT_FILTER,

@@ -16,7 +16,7 @@ export {
   GoogleFactory,
   GrokFactory,
   getFactory,
-  LlamaFactory,
+  MetaFactory,
   OpenAIFactory,
   ProviderFactory,
   type ProviderKwargs,
@@ -25,7 +25,7 @@ export {
 } from "./factory";
 export { GoogleProvider } from "./googleProvider";
 export { GrokProvider } from "./grokProvider";
-export { LlamaProvider } from "./llamaProvider";
+export { MetaProvider } from "./metaProvider";
 export { OpenAIProvider } from "./openaiProvider";
 export { QwenProvider } from "./qwenProvider";
 
