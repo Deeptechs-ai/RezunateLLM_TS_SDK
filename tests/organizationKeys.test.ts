@@ -166,4 +166,19 @@ describe("workspaceId on providers without workspaces", () => {
 
     expect(sent(fetch).headers.has("anthropic-workspace-id")).toBe(false);
   });
+
+  it.each([
+    ["grok", "grok-3-mini", grokResponse, "https://api.x.ai/v1/chat/completions"],
+    ["deepseek", "deepseek-chat", deepseekResponse, "https://api.deepseek.com/v1/chat/completions"],
+    ["meta", "muse-spark-1.3", metaResponse, "https://api.meta.ai/v1/chat/completions"],
+  ])("is ignored by %s", async (provider, model, response, expectedUrl) => {
+    const fetch = mockFetch({ json: response() });
+
+    const result = await callProvider(provider, model, { workspaceId: WORKSPACE_ID });
+
+    const { url, headers } = sent(fetch);
+    expect(result.error).toBeNull();
+    expect(url).toBe(expectedUrl);
+    expect(headers.has("anthropic-workspace-id")).toBe(false);
+  });
 });
