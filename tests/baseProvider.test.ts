@@ -8,10 +8,17 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_MAX_RETRIES, DEFAULT_RETRY_DELAY } from "../src/constants";
-import type { ChatCompletionRequest, ChatCompletionResponse, Provider } from "../src/models";
-import { ChatCompletionRequestSchema, ChatCompletionResponseSchema } from "../src/models";
-import { BaseProvider, type ProviderOptions } from "../src/providers/base";
+import { DEFAULT_MAX_RETRIES, DEFAULT_RETRY_DELAY } from "../src/rezunateLlmSdk/constants";
+import type {
+  ChatCompletionRequest,
+  ChatCompletionResponse,
+  Provider,
+} from "../src/rezunateLlmSdk/models";
+import {
+  ChatCompletionRequestSchema,
+  ChatCompletionResponseSchema,
+} from "../src/rezunateLlmSdk/models";
+import { BaseProvider, type ProviderOptions } from "../src/rezunateLlmSdk/providers/base";
 import { mockApiKey, mockFetch, openaiResponse } from "./fixtures";
 
 /** Concrete implementation of BaseProvider for testing. */

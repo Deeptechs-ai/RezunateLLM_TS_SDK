@@ -1,9 +1,9 @@
 /** Tests for the Llama (Meta) provider, ported from the Python `tests/test_llama_provider.py`. */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatCompletionRequestSchema, Provider } from "../src/models";
-import { LlamaResponseSchema } from "../src/providers/llamaModels";
-import { LlamaProvider } from "../src/providers/llamaProvider";
+import { ChatCompletionRequestSchema, Provider } from "../src/rezunateLlmSdk/models";
+import { LlamaResponseSchema } from "../src/rezunateLlmSdk/providers/llamaModels";
+import { LlamaProvider } from "../src/rezunateLlmSdk/providers/llamaProvider";
 import { llamaResponse, mockApiKey, mockFetch, sampleConversation } from "./fixtures";
 
 const LLAMA_FULL_URL = "https://api.llama.com/v1/chat/completions";

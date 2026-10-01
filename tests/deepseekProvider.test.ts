@@ -1,8 +1,8 @@
 /** Tests for the DeepSeek provider, ported from the Python `tests/test_deepseek_provider.py`. */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatCompletionRequestSchema, Provider } from "../src/models";
-import { DeepSeekProvider } from "../src/providers/deepseekProvider";
+import { ChatCompletionRequestSchema, Provider } from "../src/rezunateLlmSdk/models";
+import { DeepSeekProvider } from "../src/rezunateLlmSdk/providers/deepseekProvider";
 import {
   deepseekResponse,
   mockApiKey,

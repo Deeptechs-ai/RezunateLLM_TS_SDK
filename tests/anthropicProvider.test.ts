@@ -1,9 +1,9 @@
 /** Tests for the Anthropic provider, ported from the Python `tests/test_anthropic_provider.py`. */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatCompletionRequestSchema } from "../src/models";
-import { AnthropicResponseSchema } from "../src/providers/anthropicModels";
-import { AnthropicProvider } from "../src/providers/anthropicProvider";
+import { ChatCompletionRequestSchema } from "../src/rezunateLlmSdk/models";
+import { AnthropicResponseSchema } from "../src/rezunateLlmSdk/providers/anthropicModels";
+import { AnthropicProvider } from "../src/rezunateLlmSdk/providers/anthropicProvider";
 import {
   anthropicResponse,
   mockApiKey,

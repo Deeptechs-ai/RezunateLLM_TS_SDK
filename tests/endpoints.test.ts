@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { getUrl, OPENAI_BASE_URL, OPENAI_CHAT_ENDPOINT } from "../src/providers/endpoints";
+import {
+  getUrl,
+  OPENAI_BASE_URL,
+  OPENAI_CHAT_ENDPOINT,
+} from "../src/rezunateLlmSdk/providers/endpoints";
 
 // Expected values were produced by running the Python `get_url` on the same inputs.
 describe("getUrl", () => {

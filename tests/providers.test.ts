@@ -1,7 +1,7 @@
 /** Tests for `getProvider` and `listProviders` (no direct Python tests; covered there via the gateway). */
 
 import { describe, expect, it } from "vitest";
-import { getProvider, listProviders, OpenAIProvider } from "../src/providers";
+import { getProvider, listProviders, OpenAIProvider } from "../src/rezunateLlmSdk/providers";
 import { mockApiKey } from "./fixtures";
 
 describe("getProvider", () => {

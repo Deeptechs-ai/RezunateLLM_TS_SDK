@@ -1,9 +1,9 @@
 /** Tests for the Google (Gemini) provider, ported from the Python `tests/test_google_provider.py`. */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatCompletionRequestSchema } from "../src/models";
-import { GoogleResponseSchema } from "../src/providers/googleModels";
-import { GoogleProvider } from "../src/providers/googleProvider";
+import { ChatCompletionRequestSchema } from "../src/rezunateLlmSdk/models";
+import { GoogleResponseSchema } from "../src/rezunateLlmSdk/providers/googleModels";
+import { GoogleProvider } from "../src/rezunateLlmSdk/providers/googleProvider";
 import {
   googleResponse,
   mockApiKey,

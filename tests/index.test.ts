@@ -1,7 +1,7 @@
 /** Checks the public API exported from the package entry point (Python `__init__.py`). */
 
 import { describe, expect, it } from "vitest";
-import * as sdk from "../src/index";
+import * as sdk from "../src/rezunateLlmSdk/index";
 
 describe("package entry point", () => {
   it("exports the public API ported so far", () => {

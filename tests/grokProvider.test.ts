@@ -1,8 +1,8 @@
 /** Tests for the Grok (xAI) provider, ported from the Python `tests/test_grok_provider.py`. */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatCompletionRequestSchema, Provider } from "../src/models";
-import { GrokProvider } from "../src/providers/grokProvider";
+import { ChatCompletionRequestSchema, Provider } from "../src/rezunateLlmSdk/models";
+import { GrokProvider } from "../src/rezunateLlmSdk/providers/grokProvider";
 import { grokResponse, mockApiKey, mockFetch, openaiRequest, sampleConversation } from "./fixtures";
 
 afterEach(() => {

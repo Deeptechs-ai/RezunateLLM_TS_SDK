@@ -1,9 +1,9 @@
 /** Tests for the Qwen (DashScope) provider, ported from the Python `tests/test_qwen_provider.py`. */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatCompletionRequestSchema, Provider } from "../src/models";
-import { QwenResponseSchema } from "../src/providers/qwenModels";
-import { QwenProvider } from "../src/providers/qwenProvider";
+import { ChatCompletionRequestSchema, Provider } from "../src/rezunateLlmSdk/models";
+import { QwenResponseSchema } from "../src/rezunateLlmSdk/providers/qwenModels";
+import { QwenProvider } from "../src/rezunateLlmSdk/providers/qwenProvider";
 import {
   mockApiKey,
   mockFetch,

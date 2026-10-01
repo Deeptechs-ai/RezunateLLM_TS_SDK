@@ -1,10 +1,10 @@
 /** Tests for the provider factory, ported from the Python `tests/test_factory.py`. */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { Provider } from "../src/models";
-import { AnthropicProvider } from "../src/providers/anthropicProvider";
-import type { BaseProvider } from "../src/providers/base";
-import { DeepSeekProvider } from "../src/providers/deepseekProvider";
+import { Provider } from "../src/rezunateLlmSdk/models";
+import { AnthropicProvider } from "../src/rezunateLlmSdk/providers/anthropicProvider";
+import type { BaseProvider } from "../src/rezunateLlmSdk/providers/base";
+import { DeepSeekProvider } from "../src/rezunateLlmSdk/providers/deepseekProvider";
 import {
   AnthropicFactory,
   DeepSeekFactory,
@@ -17,12 +17,12 @@ import {
   ProviderFactory,
   QwenFactory,
   registerFactory,
-} from "../src/providers/factory";
-import { GoogleProvider } from "../src/providers/googleProvider";
-import { GrokProvider } from "../src/providers/grokProvider";
-import { LlamaProvider } from "../src/providers/llamaProvider";
-import { OpenAIProvider } from "../src/providers/openaiProvider";
-import { QwenProvider } from "../src/providers/qwenProvider";
+} from "../src/rezunateLlmSdk/providers/factory";
+import { GoogleProvider } from "../src/rezunateLlmSdk/providers/googleProvider";
+import { GrokProvider } from "../src/rezunateLlmSdk/providers/grokProvider";
+import { LlamaProvider } from "../src/rezunateLlmSdk/providers/llamaProvider";
+import { OpenAIProvider } from "../src/rezunateLlmSdk/providers/openaiProvider";
+import { QwenProvider } from "../src/rezunateLlmSdk/providers/qwenProvider";
 import { mockApiKey } from "./fixtures";
 
 /** A factory used to test registering; creates OpenAI providers. */

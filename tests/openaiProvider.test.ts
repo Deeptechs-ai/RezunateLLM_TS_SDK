@@ -7,8 +7,11 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatCompletionRequestSchema, ChatCompletionResponseSchema } from "../src/models";
-import { OpenAIProvider } from "../src/providers/openaiProvider";
+import {
+  ChatCompletionRequestSchema,
+  ChatCompletionResponseSchema,
+} from "../src/rezunateLlmSdk/models";
+import { OpenAIProvider } from "../src/rezunateLlmSdk/providers/openaiProvider";
 import { mockApiKey, mockFetch, openaiRequest, openaiResponse } from "./fixtures";
 
 const URL = "https://api.openai.com/v1/chat/completions";

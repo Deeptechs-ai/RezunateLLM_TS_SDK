@@ -1,7 +1,7 @@
 /** Tests for the gateway, ported from the Feature 1 parts of the Python `tests/test_gateway.py`. */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { chatComplete, getAvailableProviders } from "../src/gateway";
+import { chatComplete, getAvailableProviders } from "../src/rezunateLlmSdk/gateway";
 import {
   anthropicResponse,
   deepseekResponse,
