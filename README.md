@@ -2,7 +2,7 @@
 
 Unified TypeScript SDK for chat completions across multiple AI providers, using the OpenAI request/response format. It is the TypeScript version of the Python SDK [`rezunate-llm-sdk`](https://pypi.org/project/rezunate-llm-sdk/).
 
-> 🚧 **Work in progress.** Normal (non-streaming) chat works with all providers. Other features of the Python SDK are being ported; see [Status](#status). The package is not published to npm yet.
+>**Work in progress.** Normal (non-streaming) chat works with all providers. Other features of the Python SDK are being ported; see [Status](#status). The package is not published to npm yet.
 
 ## Status
 
@@ -29,18 +29,17 @@ Unified TypeScript SDK for chat completions across multiple AI providers, using 
 Every provider takes the same OpenAI-format request and returns the same OpenAI-format response:
 
 ```ts
-import { chatComplete } from "rezunate-llm-sdk";
+import { chatComplete, type ChatCompletionRequest } from "rezunate-llm-sdk";
+
+const messages: ChatCompletionRequest["messages"] = [
+  { role: "system", content: "You are a helpful assistant." },
+  { role: "user", content: "In one sentence, what is TypeScript?" },
+];
 
 const response = await chatComplete({
   provider: "openai",
   apiKey: process.env.OPENAI_API_KEY!,
-  request: {
-    model: "gpt-4o-mini",
-    messages: [
-      { role: "system", content: "You are a helpful assistant." },
-      { role: "user", content: "In one sentence, what is TypeScript?" },
-    ],
-  },
+  request: { model: "gpt-4o-mini", messages },
 });
 
 if (response.error) {
@@ -48,7 +47,7 @@ if (response.error) {
 } else {
   console.log(response.choices[0]?.message.content);
   console.log(response.choices[0]?.finish_reason); // "stop", "length", "content_filter" or "tool_calls"
-  console.log(response.choices[0]?.provider_finish_reason); // the provider's own value, e.g. "end_turn"
+  console.log(response.choices[0]?.provider_finish_reason); // the provider's own value (OpenAI: "stop", Anthropic: "end_turn")
   console.log(response.usage); // { prompt_tokens, completion_tokens, total_tokens }
 }
 ```
@@ -74,7 +73,11 @@ The SDK follows one rule:
 
 ```ts
 try {
-  const response = await chatComplete({ provider, apiKey, request });
+  const response = await chatComplete({
+    provider: "openai",
+    apiKey: process.env.OPENAI_API_KEY!,
+    request: { model: "gpt-4o-mini", messages },
+  });
   if (response.error) {
     // The provider or network failed (after retries).
     console.error(response.error.code, response.error.message);
