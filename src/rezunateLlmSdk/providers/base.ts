@@ -211,8 +211,17 @@ export abstract class BaseProvider {
         }
 
         // No more retries: record how many were made, for the error response.
+        // Replaceable, so a reused error object can get a new count; a frozen error keeps none.
         if (error !== null && typeof error === "object") {
-          Object.defineProperty(error, RETRIES_ATTEMPTED, { value: attempt });
+          try {
+            Object.defineProperty(error, RETRIES_ATTEMPTED, {
+              value: attempt,
+              writable: true,
+              configurable: true,
+            });
+          } catch {
+            // The error can't be changed: pass it on without the retry count.
+          }
         }
         throw error;
       }

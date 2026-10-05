@@ -128,6 +128,38 @@ describe("network errors", () => {
   });
 });
 
+describe("retries_attempted on reused or frozen errors", () => {
+  /** A fetch that always throws the same error object. */
+  function alwaysThrow(error: Error) {
+    const fetch = vi.fn(async () => {
+      throw error;
+    });
+    vi.stubGlobal("fetch", fetch);
+    return fetch;
+  }
+
+  it("keeps the real error when the same error object fails twice", async () => {
+    alwaysThrow(new TypeError("fetch failed"));
+
+    const first = await fastProvider("anthropic", 1).chatComplete(hiRequest("claude-haiku-4-5"));
+    const second = await fastProvider("anthropic", 0).chatComplete(hiRequest("claude-haiku-4-5"));
+
+    expect(first.error?.message).toBe("fetch failed");
+    expect(first.error?.retries_attempted).toBe(1);
+    expect(second.error?.message).toBe("fetch failed");
+    expect(second.error?.retries_attempted).toBe(0);
+  });
+
+  it("keeps the real error when the error object is frozen", async () => {
+    alwaysThrow(Object.freeze(new TypeError("fetch failed")));
+
+    const result = await fastProvider("anthropic", 0).chatComplete(hiRequest("claude-haiku-4-5"));
+
+    expect(result.error?.message).toBe("fetch failed");
+    expect(result.error?.retries_attempted).toBeNull();
+  });
+});
+
 describe("retry settings", () => {
   it("respects maxRetries for OpenAI-compatible providers", async () => {
     const fetch = mockFetch(rateLimited, rateLimited);
