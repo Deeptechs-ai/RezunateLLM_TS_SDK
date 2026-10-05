@@ -13,13 +13,26 @@ import {
   Provider,
   Role,
 } from "../models";
-import { BaseProvider } from "./base";
+import { BaseProvider, type ProviderOptions } from "./base";
 import { QWEN_BASE_URL, QWEN_GENERATION_ENDPOINT, QWEN_WORKSPACE_BASE_URL } from "./endpoints";
 import { type QwenRequest, QwenRequestSchema, QwenResponseSchema } from "./qwenModels";
+
+/** A workspace ID becomes part of a hostname, so only letters, numbers and "-" are allowed. */
+const WORKSPACE_ID_PATTERN = /^[A-Za-z0-9-]+$/;
 
 /** Qwen provider against Alibaba DashScope's native generation API. */
 export class QwenProvider extends BaseProvider {
   protected override readonly responseModel = QwenResponseSchema;
+
+  /** Throws for a workspace ID that could point the request (and the API key) at another host. */
+  constructor(options: ProviderOptions) {
+    super(options);
+    if (this.workspaceId !== null && !WORKSPACE_ID_PATTERN.test(this.workspaceId)) {
+      throw new Error(
+        `Invalid Qwen workspaceId: '${this.workspaceId}'. Only letters, numbers and "-" are allowed.`,
+      );
+    }
+  }
 
   /** The workspace-specific domain when a workspace is set, otherwise the default domain. */
   get baseUrl(): string {

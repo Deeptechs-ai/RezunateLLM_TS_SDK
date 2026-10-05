@@ -89,7 +89,10 @@ export const FINISH_REASON_MAP: Readonly<Record<string, FinishReason>> = {
  * Unknown or missing reasons fall back to `stop`, so a new provider value never breaks a reply.
  */
 export function mapFinishReason(reason: string | null | undefined): FinishReason {
-  return (reason && FINISH_REASON_MAP[reason]) || FinishReason.STOP;
+  // Object.hasOwn ignores built-in object names such as "constructor" or "__proto__".
+  return reason && Object.hasOwn(FINISH_REASON_MAP, reason)
+    ? (FINISH_REASON_MAP[reason] ?? FinishReason.STOP)
+    : FinishReason.STOP;
 }
 
 // ---- Request --------------------------------------------------------------------------

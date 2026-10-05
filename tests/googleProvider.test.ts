@@ -56,6 +56,11 @@ describe("Google provider properties", () => {
     expect(provider.getEndpoint(MODEL)).toBe("/models/gemini-2.0-flash:generateContent");
   });
 
+  it("encodes special characters in the model name", () => {
+    const provider = new GoogleProvider({ apiKey: mockApiKey });
+    expect(provider.getEndpoint("gemini/x?y=1")).toBe("/models/gemini%2Fx%3Fy%3D1:generateContent");
+  });
+
   it("includes the API key in the headers", () => {
     const provider = new GoogleProvider({ apiKey: mockApiKey });
     const headers = provider.getHeaders();
@@ -252,6 +257,58 @@ describe("Google response transformation", () => {
       );
       expect(result.choices[0]?.finish_reason).toBe(expected);
     }
+  });
+});
+
+// New in the TS port: the Python SDK drops promptFeedback and returns no choices and no reason.
+describe("Google blocked prompts", () => {
+  /** A Gemini response for a prompt blocked with the given reason (no candidates). */
+  function blockedPrompt(blockReason: string) {
+    return {
+      promptFeedback: { blockReason },
+      usageMetadata: { promptTokenCount: 8, totalTokenCount: 8 },
+    };
+  }
+
+  it.each(["SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT", "IMAGE_SAFETY", "OTHER"])(
+    "returns a content_filter choice with the reason %s",
+    (blockReason) => {
+      const provider = new GoogleProvider({ apiKey: mockApiKey });
+
+      const result = provider.transformResponse(
+        GoogleResponseSchema.parse(blockedPrompt(blockReason)),
+        MODEL,
+      );
+
+      expect(result.choices).toEqual([
+        {
+          index: 0,
+          message: { role: "assistant", content: null },
+          finish_reason: "content_filter",
+          provider_finish_reason: blockReason,
+        },
+      ]);
+    },
+  );
+
+  it("returns the blocked prompt as a normal response, not an error", async () => {
+    mockFetch({ json: blockedPrompt("SAFETY") });
+    const provider = new GoogleProvider({ apiKey: mockApiKey });
+
+    const result = await provider.chatComplete(request({ messages: hello }));
+
+    expect(result.error).toBeNull();
+    expect(result.choices[0]?.finish_reason).toBe("content_filter");
+    expect(result.choices[0]?.provider_finish_reason).toBe("SAFETY");
+    expect(result.usage.prompt_tokens).toBe(8);
+  });
+
+  it("still returns no choices when there are no candidates and no block reason", () => {
+    const provider = new GoogleProvider({ apiKey: mockApiKey });
+
+    const result = provider.transformResponse(GoogleResponseSchema.parse({}), MODEL);
+
+    expect(result.choices).toEqual([]);
   });
 });
 

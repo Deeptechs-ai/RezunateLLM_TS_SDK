@@ -137,9 +137,19 @@ export const GoogleUsageSchema = z.object({
 });
 export type GoogleUsage = z.infer<typeof GoogleUsageSchema>;
 
+/**
+ * Feedback on the prompt. When Gemini blocks the prompt itself, it returns no candidates
+ * and gives the reason here (e.g. "SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT", "OTHER").
+ */
+export const GooglePromptFeedbackSchema = z.looseObject({
+  blockReason: z.string().nullable().default(null),
+});
+export type GooglePromptFeedback = z.infer<typeof GooglePromptFeedbackSchema>;
+
 /** Google Gemini API response format. */
 export const GoogleResponseSchema = z.object({
   candidates: z.array(GoogleCandidateSchema).default(() => []),
+  promptFeedback: GooglePromptFeedbackSchema.nullable().default(null),
   usageMetadata: GoogleUsageSchema.default(() => ({
     promptTokenCount: 0,
     candidatesTokenCount: 0,

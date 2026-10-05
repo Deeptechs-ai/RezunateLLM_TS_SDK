@@ -143,6 +143,18 @@ describe("Qwen workspace", () => {
       "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
     );
   });
+
+  it.each(["evil.com/x?", "attacker.com#", "user@evil.com", "ws.abc", "ws_abc", "ws abc", ""])(
+    "rejects the unsafe workspaceId %j before sending anything",
+    async (workspaceId) => {
+      const fetch = mockFetch({ json: qwenResponse() });
+
+      await expect(callProvider("qwen", "qwen-plus", { workspaceId })).rejects.toThrow(
+        "Invalid Qwen workspaceId",
+      );
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("workspaceId on providers without workspaces", () => {

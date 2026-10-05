@@ -8,7 +8,11 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_MAX_RETRIES, DEFAULT_RETRY_DELAY } from "../src/rezunateLlmSdk/constants";
+import {
+  DEFAULT_MAX_RETRIES,
+  DEFAULT_RETRY_DELAY,
+  DEFAULT_TIMEOUT,
+} from "../src/rezunateLlmSdk/constants";
 import type {
   ChatCompletionRequest,
   ChatCompletionResponse,
@@ -74,7 +78,7 @@ describe("BaseProvider initialization", () => {
     expect(provider.apiKey).toBe(mockApiKey);
     expect(provider.maxRetries).toBe(DEFAULT_MAX_RETRIES);
     expect(provider.retryDelay).toBe(DEFAULT_RETRY_DELAY);
-    expect(provider.timeout).toBe(60.0);
+    expect(provider.timeout).toBe(DEFAULT_TIMEOUT);
   });
 
   it("initializes with custom values", () => {

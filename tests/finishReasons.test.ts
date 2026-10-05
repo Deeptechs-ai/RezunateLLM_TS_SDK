@@ -71,6 +71,13 @@ describe("mapFinishReason", () => {
     expect(mapFinishReason(null)).toBe("stop");
     expect(mapFinishReason(undefined)).toBe("stop");
   });
+
+  it.each(["constructor", "toString", "__proto__", "hasOwnProperty"])(
+    "falls back to stop for the built-in object name %s",
+    (reason) => {
+      expect(mapFinishReason(reason)).toBe("stop");
+    },
+  );
 });
 
 describe("Anthropic stop reasons", () => {

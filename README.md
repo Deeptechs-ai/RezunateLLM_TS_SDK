@@ -124,7 +124,7 @@ Some providers let one key work across several organizations, projects or worksp
 | `organization` | OpenAI | Sent as the `OpenAI-Organization` header |
 | `project` | OpenAI | Sent as the `OpenAI-Project` header |
 | `workspaceId` | Anthropic | Sent as the `anthropic-workspace-id` header (required for organization-level keys) |
-| `workspaceId` | Qwen | Uses the workspace domain `https://{workspaceId}.ap-southeast-1.maas.aliyuncs.com/api/v1` |
+| `workspaceId` | Qwen | Uses the workspace domain `https://{workspaceId}.ap-southeast-1.maas.aliyuncs.com/api/v1`. Because the ID becomes part of the hostname, only letters, numbers and `-` are allowed; anything else throws before a request is sent. |
 
 ```ts
 await chatComplete({
@@ -202,7 +202,8 @@ The TypeScript SDK is meant to behave like the Python SDK. These differences are
 3. **Finish reasons never break a reply.** Anthropic, Gemini and the OpenAI-format providers keep adding new stop/finish reasons (for example Anthropic's `refusal`, `pause_turn` and `model_context_window_exceeded`, or Gemini's `IMAGE_SAFETY`). The TS SDK translates every value the providers document today, and any value it doesn't know yet becomes `"stop"`, instead of failing. The provider's original value is always kept in `choices[].provider_finish_reason`. The Python SDK only accepts a fixed list, so a reply with a newer value (even ones its own mapping handles, such as Gemini's `BLOCKLIST` or `PROHIBITED_CONTENT`) is rejected and returned as an error.
 4. **`meta` replaces `llama`.** Meta retired the Llama API (`api.llama.com`). The `meta` provider uses Meta's new OpenAI-compatible Meta Model API (`https://api.meta.ai/v1`) with the Muse Spark models. The Python SDK still has the `llama` provider for the retired API.
 5. **Organization-level API keys are supported** (`organization`, `project`, `workspaceId`; see above). The Python SDK has none of these, so, for example, an organization-level Anthropic key fails there with "not scoped to a workspace".
-6. **TypeScript naming and style.** Functions and options use camelCase (`chatComplete`, `apiKey`), and the inputs are passed as one object (`chatComplete({ provider, apiKey, request })`). JSON fields sent to and received from providers keep their original names (`max_tokens`, `finish_reason`, and so on).
+6. **Blocked Gemini prompts are reported.** When Gemini blocks the question itself (it returns no answer, only `promptFeedback.blockReason`), the TS SDK returns one choice with no content, `finish_reason: "content_filter"` and the reason in `provider_finish_reason` (e.g. `"SAFETY"`), the same way a blocked answer is reported. The Python SDK drops the reason and returns no choices and no error.
+7. **TypeScript naming and style.** Functions and options use camelCase (`chatComplete`, `apiKey`), and the inputs are passed as one object (`chatComplete({ provider, apiKey, request })`). JSON fields sent to and received from providers keep their original names (`max_tokens`, `finish_reason`, and so on).
 
 ## Known limitations
 
@@ -210,7 +211,6 @@ These behave the same as in the Python SDK and will be improved in later feature
 
 - **Several system messages (Anthropic, Google):** these providers take a single system prompt, so when a request has more than one `system` message, only the last one is sent.
 - **Tool calls are not supported yet:** `tools` and `tool_choice` are not translated for Anthropic and Google, `tool_calls` in replies are dropped, and `tool` messages are sent as `user` messages (Qwen rejects them). Full tool-call support is planned.
-- **Blocked Gemini prompts:** when Gemini blocks the question itself (not the answer), it returns no candidates, so the response has `choices: []` and `error: null`, without the block reason.
 - **Streaming:** `stream: true` throws "Streaming is not supported yet".
 
 ## License

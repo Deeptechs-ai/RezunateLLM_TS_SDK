@@ -117,7 +117,7 @@ export abstract class BaseProvider {
     this.apiKey = options.apiKey;
     this.maxRetries = options.maxRetries ?? constants.DEFAULT_MAX_RETRIES;
     this.retryDelay = options.retryDelay ?? constants.DEFAULT_RETRY_DELAY;
-    this.timeout = options.timeout ?? 60.0;
+    this.timeout = options.timeout ?? constants.DEFAULT_TIMEOUT;
     this.organization = options.organization ?? null;
     this.project = options.project ?? null;
     this.workspaceId = options.workspaceId ?? null;

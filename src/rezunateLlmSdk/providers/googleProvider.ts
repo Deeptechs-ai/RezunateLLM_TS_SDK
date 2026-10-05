@@ -9,6 +9,7 @@ import {
   type ChatCompletionRequest,
   type ChatCompletionResponse,
   type Choice,
+  FinishReason,
   mapFinishReason,
   Provider,
   Role,
@@ -43,7 +44,8 @@ export class GoogleProvider extends BaseProvider {
 
   /** The endpoint includes the model name, e.g. `/models/gemini-2.0-flash:generateContent`. */
   getEndpoint(model?: string | null): string {
-    return GOOGLE_GENERATE_CONTENT_ENDPOINT.replaceAll("{model}", model ?? "");
+    // Encoded so characters like "?" or "/" in a model name can't change the request path.
+    return GOOGLE_GENERATE_CONTENT_ENDPOINT.replaceAll("{model}", encodeURIComponent(model ?? ""));
   }
 
   /**
@@ -90,7 +92,7 @@ export class GoogleProvider extends BaseProvider {
   transformResponse(response: unknown, model?: string | null): ChatCompletionResponse {
     const googleResponse = GoogleResponseSchema.parse(response);
 
-    const choices: Choice[] = googleResponse.candidates.map((candidate, idx) => {
+    let choices: Choice[] = googleResponse.candidates.map((candidate, idx) => {
       const textParts: string[] = [];
       for (const part of candidate.content?.parts ?? []) {
         if (part.text) {
@@ -108,6 +110,19 @@ export class GoogleProvider extends BaseProvider {
         provider_finish_reason: candidate.finishReason,
       };
     });
+
+    // The prompt itself was blocked: no candidates, the reason is in promptFeedback.
+    const blockReason = googleResponse.promptFeedback?.blockReason;
+    if (choices.length === 0 && blockReason) {
+      choices = [
+        {
+          index: 0,
+          message: { role: Role.ASSISTANT, content: null },
+          finish_reason: FinishReason.CONTENT_FILTER,
+          provider_finish_reason: blockReason,
+        },
+      ];
+    }
 
     const usageMeta = googleResponse.usageMetadata;
     const promptTokens = usageMeta.promptTokenCount;
