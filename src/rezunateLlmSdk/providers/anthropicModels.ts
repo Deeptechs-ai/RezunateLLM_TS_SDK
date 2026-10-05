@@ -89,6 +89,20 @@ export const AnthropicUsageSchema = z.object({
 });
 export type AnthropicUsage = z.infer<typeof AnthropicUsageSchema>;
 
+/**
+ * Stop reasons Anthropic documents today (all translated by FINISH_REASON_MAP).
+ * The response accepts any other value too, so a new one never breaks a reply.
+ */
+export const ANTHROPIC_STOP_REASONS = [
+  "end_turn",
+  "stop_sequence",
+  "max_tokens",
+  "tool_use",
+  "refusal",
+  "model_context_window_exceeded",
+  "pause_turn",
+] as const;
+
 /** Anthropic API response format. */
 export const AnthropicResponseSchema = z.object({
   id: z.string().default(""),
@@ -96,10 +110,7 @@ export const AnthropicResponseSchema = z.object({
   role: z.literal("assistant").default("assistant"),
   model: z.string().default(""),
   content: z.array(AnthropicContentBlockSchema).default(() => []),
-  stop_reason: z
-    .enum(["end_turn", "stop_sequence", "max_tokens", "tool_use"])
-    .nullable()
-    .default(null),
+  stop_reason: z.string().nullable().default(null),
   usage: AnthropicUsageSchema.default(() => ({ input_tokens: 0, output_tokens: 0 })),
 });
 export type AnthropicResponse = z.infer<typeof AnthropicResponseSchema>;

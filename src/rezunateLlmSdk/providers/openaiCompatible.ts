@@ -2,7 +2,7 @@ import OpenAI, { type ClientOptions } from "openai";
 import type { ChatCompletionCreateParamsNonStreaming } from "openai/resources/chat/completions";
 import * as constants from "../constants";
 import type { ChatCompletionRequest, ChatCompletionResponse } from "../models";
-import { ChatCompletionResponseSchema } from "../models";
+import { ChatCompletionResponseSchema, mapFinishReason } from "../models";
 import { BaseProvider, dropNones } from "./base";
 import { OPENAI_CHAT_ENDPOINT } from "./endpoints";
 
@@ -23,7 +23,8 @@ export abstract class OpenAICompatibleProvider extends BaseProvider {
     this.cachedClient ??= new OpenAI({
       apiKey: this.apiKey,
       baseURL: this.baseUrl,
-      maxRetries: this.maxRetries,
+      // Retries are handled by the shared loop in BaseProvider, the same for every provider.
+      maxRetries: 0,
       ...this.extraClientOptions(),
     });
     return this.cachedClient;
@@ -59,7 +60,8 @@ export abstract class OpenAICompatibleProvider extends BaseProvider {
     return request;
   }
 
-  protected override async executeRequest(providerRequest: unknown): Promise<unknown> {
+  /** Send the request once through the OpenAI SDK; retries come from the shared loop. */
+  protected override async sendRequest(providerRequest: unknown): Promise<unknown> {
     // Our request model is looser than the SDK's param types (extra fields are allowed and
     // passed through, as in Python), so it is handed over as the SDK's param type.
     const params = dropNones(providerRequest) as ChatCompletionCreateParamsNonStreaming;
@@ -68,11 +70,26 @@ export abstract class OpenAICompatibleProvider extends BaseProvider {
 
   /**
    * Convert the SDK response to our internal model.
-   *
-   * Providers that need to normalize quirky finish_reason values
-   * (e.g. DeepSeek) override this with a small pre-validation step.
+   * Each finish_reason is translated first (e.g. DeepSeek's `insufficient_system_resource`,
+   * or a value we don't know yet), and the original is kept in `provider_finish_reason`.
    */
   transformResponse(response: unknown): ChatCompletionResponse {
-    return ChatCompletionResponseSchema.parse(response);
+    if (response === null || typeof response !== "object") {
+      return ChatCompletionResponseSchema.parse(response);
+    }
+
+    const data = { ...(response as Record<string, unknown>) };
+    if (Array.isArray(data.choices)) {
+      data.choices = data.choices.map((choice: unknown) => {
+        if (choice === null || typeof choice !== "object") {
+          return choice;
+        }
+        const reason = (choice as { finish_reason?: unknown }).finish_reason;
+        return typeof reason === "string"
+          ? { ...choice, finish_reason: mapFinishReason(reason), provider_finish_reason: reason }
+          : choice;
+      });
+    }
+    return ChatCompletionResponseSchema.parse(data);
   }
 }

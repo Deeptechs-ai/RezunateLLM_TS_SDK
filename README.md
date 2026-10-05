@@ -10,7 +10,7 @@ Unified TypeScript SDK for chat completions across multiple AI providers, using 
 |---|---|
 | Chat completion with OpenAI, Anthropic, Google (Gemini), Grok (xAI), DeepSeek, Qwen (Alibaba) and Meta | ✅ Done |
 | Provider factory and registry (same design as the Python SDK) | ✅ Done |
-| Automatic retries, timeouts, errors returned as a response | ✅ Done |
+| Automatic retries (one rule for all providers), timeouts, errors returned as a response | ✅ Done |
 | Organization-level API keys (`organization`, `project`, `workspaceId`) | ✅ Done |
 | Streaming | ⏳ Planned |
 | Tool calls | ⏳ Planned |
@@ -47,6 +47,8 @@ if (response.error) {
   console.error(response.error.code, response.error.message);
 } else {
   console.log(response.choices[0]?.message.content);
+  console.log(response.choices[0]?.finish_reason); // "stop", "length", "content_filter" or "tool_calls"
+  console.log(response.choices[0]?.provider_finish_reason); // the provider's own value, e.g. "end_turn"
   console.log(response.usage); // { prompt_tokens, completion_tokens, total_tokens }
 }
 ```
@@ -61,7 +63,43 @@ await chatComplete({
 });
 ```
 
-**Errors are returned, not thrown.** If a provider call fails (wrong key, network error, rate limit), `chatComplete` returns a response with `error` set (`message`, `code` and so on) and empty `choices`. Temporary failures (429, 500, 502, 503, 504, timeouts, connection errors) are retried up to 3 times first. An unknown provider name or an invalid request (for example a wrong `role`) does throw.
+### Errors
+
+The SDK follows one rule:
+
+| What went wrong | Example | What you get |
+|---|---|---|
+| **Your request is invalid** | unknown provider, wrong `role`, a setting with the wrong type (e.g. `top_k: "abc"`) | `chatComplete` **throws** right away, so the mistake shows up during development |
+| **The provider or the network failed** | wrong API key, rate limit, server error, timeout | a normal response with **`error`** set (`message`, `code`, `retries_attempted`) and empty `choices`; nothing is thrown |
+
+```ts
+try {
+  const response = await chatComplete({ provider, apiKey, request });
+  if (response.error) {
+    // The provider or network failed (after retries).
+    console.error(response.error.code, response.error.message);
+  }
+} catch (err) {
+  // The request itself was invalid: fix the code.
+}
+```
+
+### Retries
+
+Every provider uses the same retry rule. A failed call is retried on **429, 500, 502, 503, 504**, timeouts and connection errors, waiting 1s, 2s, then 4s (plus a small random delay). Other errors, such as 400 or 401, are not retried. After the last attempt, `error.retries_attempted` says how many retries were made.
+
+The defaults are 3 retries, a 1-second base delay and a 60-second timeout. To change them, create the provider yourself:
+
+```ts
+import { getProvider } from "rezunate-llm-sdk";
+
+const provider = getProvider("openai", process.env.OPENAI_API_KEY!, {
+  maxRetries: 5,
+  retryDelay: 2, // seconds
+  timeout: 30, // seconds
+});
+const response = await provider.chatComplete({ model: "gpt-4o-mini", messages });
+```
 
 ## Providers
 
@@ -159,11 +197,21 @@ The `rezunate-guard` CLI will live next to the library in `src/rezunateGuard/`, 
 
 The TypeScript SDK is meant to behave like the Python SDK. These differences are intentional:
 
-1. **`retries_attempted` is filled in.** When a request finally fails after retries, `error.retries_attempted` shows how many retries were made (for example `3` after 4 failed attempts, `0` when the error was not retried). In Python it is always empty. This applies to Anthropic, Google and Qwen; for OpenAI, Grok, DeepSeek and Meta the `openai` library retries internally and doesn't report a count, so it stays empty, as in Python.
-2. **More Gemini finish reasons are accepted.** When Gemini stops an answer with `BLOCKLIST`, `PROHIBITED_CONTENT`, `SPII` or `MALFORMED_FUNCTION_CALL`, the TS SDK returns a normal response with `finish_reason: "content_filter"` (or `"stop"` for `MALFORMED_FUNCTION_CALL`). The Python SDK rejects those replies as invalid and returns an error, even though its finish-reason mapping already handles them.
-3. **`meta` replaces `llama`.** Meta retired the Llama API (`api.llama.com`). The `meta` provider uses Meta's new OpenAI-compatible Meta Model API (`https://api.meta.ai/v1`) with the Muse Spark models. The Python SDK still has the `llama` provider for the retired API.
-4. **Organization-level API keys are supported** (`organization`, `project`, `workspaceId`; see above). The Python SDK has none of these, so, for example, an organization-level Anthropic key fails there with "not scoped to a workspace".
-5. **TypeScript naming and style.** Functions and options use camelCase (`chatComplete`, `apiKey`), and the inputs are passed as one object (`chatComplete({ provider, apiKey, request })`). JSON fields sent to and received from providers keep their original names (`max_tokens`, `finish_reason`, and so on).
+1. **One retry rule for every provider.** All seven providers retry through the SDK's own loop (429/500/502/503/504, timeouts and connection errors; 1s → 2s → 4s; `maxRetries` and `retryDelay` always apply). In Python, OpenAI, Grok and DeepSeek are retried by the `openai` library with its own rules (it also retries 408 and 409, and ignores `retry_delay`), and the others by the SDK's loop.
+2. **`retries_attempted` is filled in, for every provider.** When a request finally fails, `error.retries_attempted` shows how many retries were made (for example `3` after 4 failed attempts, `0` when the error was not retried). In Python it is always empty.
+3. **Finish reasons never break a reply.** Anthropic, Gemini and the OpenAI-format providers keep adding new stop/finish reasons (for example Anthropic's `refusal`, `pause_turn` and `model_context_window_exceeded`, or Gemini's `IMAGE_SAFETY`). The TS SDK translates every value the providers document today, and any value it doesn't know yet becomes `"stop"`, instead of failing. The provider's original value is always kept in `choices[].provider_finish_reason`. The Python SDK only accepts a fixed list, so a reply with a newer value (even ones its own mapping handles, such as Gemini's `BLOCKLIST` or `PROHIBITED_CONTENT`) is rejected and returned as an error.
+4. **`meta` replaces `llama`.** Meta retired the Llama API (`api.llama.com`). The `meta` provider uses Meta's new OpenAI-compatible Meta Model API (`https://api.meta.ai/v1`) with the Muse Spark models. The Python SDK still has the `llama` provider for the retired API.
+5. **Organization-level API keys are supported** (`organization`, `project`, `workspaceId`; see above). The Python SDK has none of these, so, for example, an organization-level Anthropic key fails there with "not scoped to a workspace".
+6. **TypeScript naming and style.** Functions and options use camelCase (`chatComplete`, `apiKey`), and the inputs are passed as one object (`chatComplete({ provider, apiKey, request })`). JSON fields sent to and received from providers keep their original names (`max_tokens`, `finish_reason`, and so on).
+
+## Known limitations
+
+These behave the same as in the Python SDK and will be improved in later features:
+
+- **Several system messages (Anthropic, Google):** these providers take a single system prompt, so when a request has more than one `system` message, only the last one is sent.
+- **Tool calls are not supported yet:** `tools` and `tool_choice` are not translated for Anthropic and Google, `tool_calls` in replies are dropped, and `tool` messages are sent as `user` messages (Qwen rejects them). Full tool-call support is planned.
+- **Blocked Gemini prompts:** when Gemini blocks the question itself (not the answer), it returns no candidates, so the response has `choices: []` and `error: null`, without the block reason.
+- **Streaming:** `stream: true` throws "Streaming is not supported yet".
 
 ## License
 

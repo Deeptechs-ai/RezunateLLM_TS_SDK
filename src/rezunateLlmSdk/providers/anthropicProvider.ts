@@ -8,8 +8,7 @@ import * as constants from "../constants";
 import {
   type ChatCompletionRequest,
   type ChatCompletionResponse,
-  FINISH_REASON_MAP,
-  FinishReason,
+  mapFinishReason,
   Provider,
   Role,
 } from "../models";
@@ -98,7 +97,6 @@ export class AnthropicProvider extends BaseProvider {
     }
 
     const stopReason = anthropicResponse.stop_reason;
-    const finishReason = (stopReason && FINISH_REASON_MAP[stopReason]) || FinishReason.STOP;
     const content = textParts.length > 0 ? textParts.join("") : null;
 
     const inputTokens = anthropicResponse.usage.input_tokens;
@@ -113,7 +111,8 @@ export class AnthropicProvider extends BaseProvider {
         {
           index: 0,
           message: { role: Role.ASSISTANT, content },
-          finish_reason: finishReason,
+          finish_reason: mapFinishReason(stopReason),
+          provider_finish_reason: stopReason,
         },
       ],
       usage: {

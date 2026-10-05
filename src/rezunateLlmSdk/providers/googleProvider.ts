@@ -9,8 +9,7 @@ import {
   type ChatCompletionRequest,
   type ChatCompletionResponse,
   type Choice,
-  FINISH_REASON_MAP,
-  FinishReason,
+  mapFinishReason,
   Provider,
   Role,
 } from "../models";
@@ -99,16 +98,14 @@ export class GoogleProvider extends BaseProvider {
         }
       }
 
-      const reason = candidate.finishReason;
-      const finishReason = (reason && FINISH_REASON_MAP[reason]) || FinishReason.STOP;
-
       return {
         index: idx,
         message: {
           role: Role.ASSISTANT,
           content: textParts.length > 0 ? textParts.join("") : null,
         },
-        finish_reason: finishReason,
+        finish_reason: mapFinishReason(candidate.finishReason),
+        provider_finish_reason: candidate.finishReason,
       };
     });
 

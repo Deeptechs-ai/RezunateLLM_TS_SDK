@@ -69,11 +69,19 @@ function statusCodeOf(error: unknown): number | null {
   return null;
 }
 
-/** Whether a `fetch` error is a timeout or a network failure (both are retried). */
+/** Error names the `openai` SDK uses for timeouts and network failures. */
+const SDK_CONNECTION_ERRORS = new Set(["APIConnectionError", "APIConnectionTimeoutError"]);
+
+/** Whether an error is a timeout or a network failure (both are retried). */
 function isTimeoutOrConnectionError(error: unknown): boolean {
   if (error instanceof Error) {
-    // AbortSignal.timeout() rejects with "TimeoutError"; network failures reject with a TypeError.
-    return error.name === "TimeoutError" || error instanceof TypeError;
+    // fetch: AbortSignal.timeout() rejects with "TimeoutError"; a network failure rejects with
+    // TypeError("fetch failed"). Other TypeErrors are bugs and are not retried (as in Python).
+    return (
+      error.name === "TimeoutError" ||
+      (error instanceof TypeError && error.message === "fetch failed") ||
+      SDK_CONNECTION_ERRORS.has(error.constructor.name)
+    );
   }
   return false;
 }
@@ -181,36 +189,17 @@ export abstract class BaseProvider {
   }
 
   /**
-   * Execute the request with retry logic.
-   * Default implementation uses the built-in fetch.
-   * Subclasses can override this to use their own SDKs.
+   * Execute the request with retry logic, shared by every provider.
+   * Each attempt is made by `sendRequest`; failed attempts are retried on retryable errors.
    */
   protected async executeRequest(
     providerRequest: unknown,
     model?: string | null,
   ): Promise<unknown> {
-    // Build full URL
-    const url = getUrl(this.baseUrl, this.getEndpoint(model));
-
     // Retry loop
     for (let attempt = 0; ; attempt++) {
       try {
-        const response = await fetch(url, {
-          method: "POST",
-          headers: this.getHeaders(),
-          body: JSON.stringify(dropNones(providerRequest)),
-          signal: AbortSignal.timeout(this.timeout * 1000),
-        });
-        if (!response.ok) {
-          throw new HttpError(response.status, response.statusText, url);
-        }
-        const providerResponseData: unknown = await response.json();
-
-        // Validate response using provider's model
-        if (this.responseModel) {
-          return this.responseModel.parse(providerResponseData);
-        }
-        return providerResponseData;
+        return await this.sendRequest(providerRequest, model);
       } catch (error) {
         // Check if we should retry
         const retryable =
@@ -228,6 +217,31 @@ export abstract class BaseProvider {
         throw error;
       }
     }
+  }
+
+  /**
+   * Send the request once, without retrying.
+   * Default implementation uses the built-in fetch; OpenAI-compatible providers use the SDK.
+   */
+  protected async sendRequest(providerRequest: unknown, model?: string | null): Promise<unknown> {
+    const url = getUrl(this.baseUrl, this.getEndpoint(model));
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(dropNones(providerRequest)),
+      signal: AbortSignal.timeout(this.timeout * 1000),
+    });
+    if (!response.ok) {
+      throw new HttpError(response.status, response.statusText, url);
+    }
+    const providerResponseData: unknown = await response.json();
+
+    // Validate response using provider's model
+    if (this.responseModel) {
+      return this.responseModel.parse(providerResponseData);
+    }
+    return providerResponseData;
   }
 
   /** Centralized error handling for all providers. */

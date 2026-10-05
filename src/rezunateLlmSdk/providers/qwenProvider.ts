@@ -9,8 +9,7 @@ import {
   type ChatCompletionRequest,
   type ChatCompletionResponse,
   type Choice,
-  FINISH_REASON_MAP,
-  FinishReason,
+  mapFinishReason,
   Provider,
   Role,
 } from "../models";
@@ -76,15 +75,13 @@ export class QwenProvider extends BaseProvider {
     const qwenResponse = QwenResponseSchema.parse(response);
     const output = qwenResponse.output;
 
-    const finishReasonOf = (reason: string | null) =>
-      FINISH_REASON_MAP[reason || "stop"] ?? FinishReason.STOP;
-
     let choices: Choice[] = [];
     if (output.choices.length > 0) {
       choices = output.choices.map((choice, idx) => ({
         index: idx,
         message: { role: Role.ASSISTANT, content: choice.message.content },
-        finish_reason: finishReasonOf(choice.finish_reason),
+        finish_reason: mapFinishReason(choice.finish_reason),
+        provider_finish_reason: choice.finish_reason,
       }));
     } else if (output.text !== null) {
       // Legacy result_format="text" path
@@ -92,7 +89,8 @@ export class QwenProvider extends BaseProvider {
         {
           index: 0,
           message: { role: Role.ASSISTANT, content: output.text },
-          finish_reason: finishReasonOf(output.finish_reason),
+          finish_reason: mapFinishReason(output.finish_reason),
+          provider_finish_reason: output.finish_reason,
         },
       ];
     }

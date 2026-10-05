@@ -95,24 +95,37 @@ export type GoogleRequest = z.infer<typeof GoogleRequestSchema>;
 
 // ---- Response --------------------------------------------------------------------------
 
+/**
+ * Finish reasons Gemini documents today (all translated by FINISH_REASON_MAP).
+ * The response accepts any other value too, so a new one never breaks a reply.
+ */
+export const GOOGLE_FINISH_REASONS = [
+  "FINISH_REASON_UNSPECIFIED",
+  "STOP",
+  "MAX_TOKENS",
+  "SAFETY",
+  "RECITATION",
+  "LANGUAGE",
+  "OTHER",
+  "BLOCKLIST",
+  "PROHIBITED_CONTENT",
+  "SPII",
+  "MALFORMED_FUNCTION_CALL",
+  "IMAGE_SAFETY",
+  "UNEXPECTED_TOOL_CALL",
+  "TOO_MANY_TOOL_CALLS",
+  "IMAGE_PROHIBITED_CONTENT",
+  "NO_IMAGE",
+  "IMAGE_RECITATION",
+  "IMAGE_OTHER",
+  "CONTINUATION",
+  "FUNCTION_CALL",
+] as const;
+
 /** Candidate (one possible answer) in a Google response. */
 export const GoogleCandidateSchema = z.object({
   content: GoogleMessageSchema.nullable().default(null),
-  finishReason: z
-    .enum([
-      "STOP",
-      "MAX_TOKENS",
-      "SAFETY",
-      "RECITATION",
-      "OTHER",
-      "FUNCTION_CALL",
-      "BLOCKLIST",
-      "PROHIBITED_CONTENT",
-      "SPII",
-      "MALFORMED_FUNCTION_CALL",
-    ])
-    .nullable()
-    .default(null),
+  finishReason: z.string().nullable().default(null),
 });
 export type GoogleCandidate = z.infer<typeof GoogleCandidateSchema>;
 

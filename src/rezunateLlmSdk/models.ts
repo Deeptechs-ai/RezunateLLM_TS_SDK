@@ -53,6 +53,7 @@ export const FINISH_REASON_MAP: Readonly<Record<string, FinishReason>> = {
   tool_calls: FinishReason.TOOL_CALLS,
   // DeepSeek-specific — returned by deepseek-reasoner under resource pressure
   insufficient_system_resource: FinishReason.STOP,
+  aborted: FinishReason.STOP,
   // Google Gemini
   STOP: FinishReason.STOP,
   MAX_TOKENS: FinishReason.LENGTH,
@@ -63,12 +64,33 @@ export const FINISH_REASON_MAP: Readonly<Record<string, FinishReason>> = {
   SPII: FinishReason.CONTENT_FILTER,
   OTHER: FinishReason.STOP,
   MALFORMED_FUNCTION_CALL: FinishReason.STOP,
+  IMAGE_SAFETY: FinishReason.CONTENT_FILTER,
+  IMAGE_PROHIBITED_CONTENT: FinishReason.CONTENT_FILTER,
+  IMAGE_RECITATION: FinishReason.CONTENT_FILTER,
+  UNEXPECTED_TOOL_CALL: FinishReason.STOP,
+  TOO_MANY_TOOL_CALLS: FinishReason.STOP,
+  CONTINUATION: FinishReason.LENGTH,
+  LANGUAGE: FinishReason.STOP,
+  NO_IMAGE: FinishReason.STOP,
+  IMAGE_OTHER: FinishReason.STOP,
+  FINISH_REASON_UNSPECIFIED: FinishReason.STOP,
   // Anthropic
   end_turn: FinishReason.STOP,
   stop_sequence: FinishReason.STOP,
   max_tokens: FinishReason.LENGTH,
   tool_use: FinishReason.TOOL_CALLS,
+  refusal: FinishReason.CONTENT_FILTER,
+  model_context_window_exceeded: FinishReason.LENGTH,
+  pause_turn: FinishReason.STOP,
 };
+
+/**
+ * Translate a provider's finish/stop reason into ours.
+ * Unknown or missing reasons fall back to `stop`, so a new provider value never breaks a reply.
+ */
+export function mapFinishReason(reason: string | null | undefined): FinishReason {
+  return (reason && FINISH_REASON_MAP[reason]) || FinishReason.STOP;
+}
 
 // ---- Request --------------------------------------------------------------------------
 
@@ -119,6 +141,8 @@ export const ChoiceSchema = z.object({
   index: z.number().int().default(0),
   message: ResponseMessageSchema,
   finish_reason: FinishReasonSchema.nullable().default(null),
+  /** The provider's original finish/stop reason (e.g. "refusal", "IMAGE_SAFETY"), if any. */
+  provider_finish_reason: z.string().nullable().default(null),
 });
 export type Choice = z.infer<typeof ChoiceSchema>;
 
