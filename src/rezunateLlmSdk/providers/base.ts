@@ -5,7 +5,17 @@
 
 import type { z } from "zod";
 import * as constants from "../constants";
-import type { ChatCompletionRequest, ChatCompletionResponse, Provider } from "../models";
+import {
+  type ChatCompletionChunk,
+  type ChatCompletionRequest,
+  type ChatCompletionResponse,
+  type ChoiceDelta,
+  type ErrorInfo,
+  mapFinishReason,
+  type Provider,
+  type Usage,
+} from "../models";
+import { parseSseLines, readLines } from "../streaming/sseParser";
 import { getUrl } from "./endpoints";
 
 /** Settings shared by every provider. Times are in seconds, as in the Python SDK. */
@@ -92,6 +102,64 @@ function sleep(seconds: number): Promise<void> {
 
 /** Number of retries made before a request finally failed, attached to the thrown error. */
 const RETRIES_ATTEMPTED = Symbol("retriesAttempted");
+
+/** The same error `AbortSignal.timeout()` raises, so timeouts are retried the same way. */
+function timeoutError(): DOMException {
+  return new DOMException("The operation was aborted due to timeout", "TimeoutError");
+}
+
+/**
+ * Pass the body through, aborting when no data arrives for `ms` milliseconds.
+ * Like httpx's read timeout: a long stream is fine as long as data keeps coming.
+ */
+async function* withIdleTimeout(
+  body: AsyncIterable<Uint8Array>,
+  controller: AbortController,
+  ms: number,
+): AsyncGenerator<Uint8Array> {
+  const iterator = body[Symbol.asyncIterator]();
+  try {
+    while (true) {
+      const timer = setTimeout(() => controller.abort(timeoutError()), ms);
+      let result: IteratorResult<Uint8Array>;
+      try {
+        result = await iterator.next();
+      } finally {
+        clearTimeout(timer);
+      }
+      if (result.done) {
+        return;
+      }
+      yield result.value;
+    }
+  } finally {
+    // Closes the connection when the caller stops reading early.
+    await iterator.return?.();
+  }
+}
+
+/** Per-stream state passed to the translation hooks. */
+export interface StreamState {
+  id: string;
+  model: string | null;
+  created: number;
+  inputTokens: number;
+  roleSent: boolean;
+}
+
+/** URL, body and headers for the streaming POST. */
+export interface StreamRequest {
+  url: string;
+  body: unknown;
+  headers: Record<string, string>;
+}
+
+/** Fields for `makeChunk`; `finishReason` is the provider's own value, mapped by `makeChunk`. */
+export interface ChunkFields {
+  delta?: Partial<ChoiceDelta>;
+  finishReason?: string | null;
+  usage?: Usage | null;
+}
 
 /**
  * Abstract base class for all providers.
@@ -196,10 +264,15 @@ export abstract class BaseProvider {
     providerRequest: unknown,
     model?: string | null,
   ): Promise<unknown> {
+    return this.withRetries(() => this.sendRequest(providerRequest, model));
+  }
+
+  /** Run `attemptFn`, retrying it on retryable errors. Used by chat and by stream start. */
+  protected async withRetries<T>(attemptFn: () => Promise<T>): Promise<T> {
     // Retry loop
     for (let attempt = 0; ; attempt++) {
       try {
-        return await this.sendRequest(providerRequest, model);
+        return await attemptFn();
       } catch (error) {
         // Check if we should retry
         const retryable =
@@ -255,11 +328,6 @@ export abstract class BaseProvider {
 
   /** Centralized error handling for all providers. */
   protected handleError(error: unknown, model?: string | null): ChatCompletionResponse {
-    const retriesAttempted =
-      error !== null && typeof error === "object" && RETRIES_ATTEMPTED in error
-        ? (error as { [RETRIES_ATTEMPTED]: number })[RETRIES_ATTEMPTED]
-        : null;
-
     return {
       id: null,
       object: "chat.completion",
@@ -268,12 +336,161 @@ export abstract class BaseProvider {
       choices: [],
       usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
       provider: this.providerName,
-      error: {
-        message: error instanceof Error ? error.message : String(error),
-        type: "api_error",
-        code: statusCodeOf(error),
-        retries_attempted: retriesAttempted,
-      },
+      error: this.errorInfo(error),
     };
+  }
+
+  /** The `error` field shared by error responses and error chunks. */
+  protected errorInfo(error: unknown): ErrorInfo {
+    const retriesAttempted =
+      error !== null && typeof error === "object" && RETRIES_ATTEMPTED in error
+        ? (error as { [RETRIES_ATTEMPTED]: number })[RETRIES_ATTEMPTED]
+        : null;
+
+    return {
+      message: error instanceof Error ? error.message : String(error),
+      type: "api_error",
+      code: statusCodeOf(error),
+      retries_attempted: retriesAttempted,
+    };
+  }
+
+  // Streaming
+
+  /**
+   * Streaming chat completion, driven through SSE. Override for SDK-based streaming.
+   * Only opening the stream is retried; any failure ends the stream with an error chunk.
+   */
+  async *stream(request: ChatCompletionRequest): AsyncGenerator<ChatCompletionChunk> {
+    const state = this.newStreamState(request);
+    try {
+      const { url, body, headers } = this.buildStreamRequest(request);
+      // Once text has arrived, a retry would repeat it, so only the start is retried.
+      const lines = await this.withRetries(() => this.streamHttpLines(url, body, headers));
+      for await (const { event, data } of parseSseLines(lines)) {
+        if (this.isStreamTerminator(event, data)) {
+          return;
+        }
+        const chunk = this.translateFrame(event, data, state);
+        if (chunk) {
+          yield chunk;
+        }
+      }
+    } catch (error) {
+      yield this.errorChunk(error, request.model);
+    }
+  }
+
+  // ---- hooks (override in native-protocol providers) ----
+
+  /** Per-stream state. Defaults to a fresh `StreamState`. */
+  protected newStreamState(request: ChatCompletionRequest): StreamState {
+    return {
+      id: `chatcmpl-${crypto.randomUUID().replaceAll("-", "").slice(0, 8)}`,
+      model: request.model,
+      created: Math.floor(Date.now() / 1000),
+      inputTokens: 0,
+      roleSent: false,
+    };
+  }
+
+  /** Return the URL, body and headers for the streaming POST. */
+  protected buildStreamRequest(_request: ChatCompletionRequest): StreamRequest {
+    throw new Error(`${this.constructor.name} does not implement buildStreamRequest`);
+  }
+
+  /** Translate one SSE frame into a chunk, or `null` to skip it. */
+  protected translateFrame(
+    _event: string,
+    _data: string,
+    _state: StreamState,
+  ): ChatCompletionChunk | null {
+    throw new Error(`${this.constructor.name} does not implement translateFrame`);
+  }
+
+  /** Return `true` when this frame ends the stream. */
+  protected isStreamTerminator(_event: string, _data: string): boolean {
+    return false;
+  }
+
+  // ---- shared helpers ----
+
+  /** Parse a JSON SSE frame payload. Returns `null` if empty or malformed. */
+  protected static parseJsonFrame(data: string): unknown {
+    if (!data) {
+      return null;
+    }
+    try {
+      return JSON.parse(data);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Build a chunk from stream state; the finish reason is mapped and the original kept. */
+  protected makeChunk(state: StreamState, fields: ChunkFields = {}): ChatCompletionChunk {
+    const finishReason = fields.finishReason ?? null;
+    return {
+      id: state.id,
+      object: "chat.completion.chunk",
+      created: state.created,
+      model: state.model,
+      choices: [
+        {
+          index: 0,
+          delta: { role: null, content: null, ...fields.delta },
+          finish_reason: finishReason === null ? null : mapFinishReason(finishReason),
+          provider_finish_reason: finishReason,
+        },
+      ],
+      usage: fields.usage ?? null,
+      provider: this.providerName,
+      error: null,
+    };
+  }
+
+  /** Terminal-error chunk, with the same `error` field as `handleError`. */
+  protected errorChunk(error: unknown, model?: string | null): ChatCompletionChunk {
+    return {
+      id: null,
+      object: "chat.completion.chunk",
+      created: Math.floor(Date.now() / 1000),
+      model: model ?? null,
+      choices: [],
+      usage: null,
+      provider: this.providerName,
+      error: this.errorInfo(error),
+    };
+  }
+
+  /**
+   * Open one streaming POST (no retry) and return its text lines.
+   * The timeout restarts whenever data arrives, so long streams are not cut off.
+   */
+  protected async streamHttpLines(
+    url: string,
+    body: unknown,
+    headers: Record<string, string> = this.getHeaders(),
+  ): Promise<AsyncIterable<string>> {
+    const ms = this.timeout * 1000;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(timeoutError()), ms);
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(dropNones(body)),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!response.ok || !response.body) {
+      await response.body?.cancel();
+      throw new HttpError(response.status, response.statusText, url);
+    }
+    return readLines(withIdleTimeout(response.body, controller, ms));
   }
 }

@@ -170,3 +170,33 @@ export const ChatCompletionResponseSchema = z.object({
   error: ErrorInfoSchema.nullable().default(null),
 });
 export type ChatCompletionResponse = z.infer<typeof ChatCompletionResponseSchema>;
+
+/** Incremental delta for a streaming choice (OpenAI chunk shape). */
+export const ChoiceDeltaSchema = z.object({
+  role: RoleSchema.nullable().default(null),
+  content: z.string().nullable().default(null),
+});
+export type ChoiceDelta = z.infer<typeof ChoiceDeltaSchema>;
+
+/** A single choice in a streaming chat completion chunk. */
+export const ChoiceChunkSchema = z.object({
+  index: z.number().int().default(0),
+  delta: ChoiceDeltaSchema.default(() => ({ role: null, content: null })),
+  finish_reason: FinishReasonSchema.nullable().default(null),
+  /** The provider's original finish/stop reason, if any (same as in `Choice`). */
+  provider_finish_reason: z.string().nullable().default(null),
+});
+export type ChoiceChunk = z.infer<typeof ChoiceChunkSchema>;
+
+/** One chunk of a streaming chat completion in OpenAI format. */
+export const ChatCompletionChunkSchema = z.object({
+  id: z.string().nullable().default(null),
+  object: z.string().default("chat.completion.chunk"),
+  created: z.number().int().default(0),
+  model: z.string().nullable().default(null),
+  choices: z.array(ChoiceChunkSchema).default(() => []),
+  usage: UsageSchema.nullable().default(null),
+  provider: ProviderSchema.nullable().default(null),
+  error: ErrorInfoSchema.nullable().default(null),
+});
+export type ChatCompletionChunk = z.infer<typeof ChatCompletionChunkSchema>;
