@@ -737,3 +737,167 @@ describe("anthropic streaming", () => {
     expect(chunks.map((c) => c.choices[0]?.delta.content).join("")).toBe("Hello");
   });
 });
+
+/** One streamed Gemini frame with the given text, finish reason and usage. */
+function geminiFrame(text: string, finishReason?: string, usage?: [number, number]) {
+  return {
+    candidates: [
+      { content: { role: "model", parts: [{ text }] }, ...(finishReason ? { finishReason } : {}) },
+    ],
+    ...(usage
+      ? {
+          usageMetadata: {
+            promptTokenCount: usage[0],
+            candidatesTokenCount: usage[1],
+            totalTokenCount: usage[0] + usage[1],
+          },
+        }
+      : {}),
+  };
+}
+
+function geminiRequest(model = "gemini-2.5-flash") {
+  return ChatCompletionRequestSchema.parse({
+    model,
+    messages: [
+      { role: "system", content: "Be brief." },
+      { role: "user", content: "Hi" },
+    ],
+    stream: true,
+  });
+}
+
+describe("google streaming", () => {
+  it("turns Gemini frames into chunks", async () => {
+    mockStreamFetch({
+      pieces: [sseData(geminiFrame("Hel", undefined, [4, 1]), geminiFrame("lo", "STOP", [4, 2]))],
+    });
+
+    const chunks = await collect(streamingProvider("google").stream(geminiRequest()));
+
+    expect(chunks.map((c) => c.choices[0]?.delta)).toEqual([
+      { role: "assistant", content: "Hel" },
+      { role: null, content: "lo" },
+    ]);
+    expect(chunks[0]?.choices[0]?.finish_reason).toBeNull();
+    expect(chunks[1]?.choices[0]?.finish_reason).toBe("stop");
+    expect(chunks[1]?.choices[0]?.provider_finish_reason).toBe("STOP");
+    expect(chunks[1]?.usage).toEqual({ prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 });
+    expect(chunks[1]?.id).toBe(chunks[0]?.id);
+    expect(chunks.every((c) => c.model === "gemini-2.5-flash" && c.provider === "google")).toBe(
+      true,
+    );
+  });
+
+  it("POSTs the Gemini request to the stream URL", async () => {
+    const fetch = mockStreamFetch({ pieces: [sseData(geminiFrame("Hi", "STOP"))] });
+
+    await collect(streamingProvider("google").stream(geminiRequest()));
+
+    const [url, init] = fetch.mock.calls[0] ?? [];
+    expect(url).toBe(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse",
+    );
+    expect(JSON.parse(String(init?.body))).toEqual({
+      contents: [{ role: "user", parts: [{ text: "Hi" }] }],
+      systemInstruction: { parts: [{ text: "Be brief." }] },
+    });
+    expect(init?.headers).toMatchObject({ "x-goog-api-key": mockApiKey });
+  });
+
+  it("encodes the model name in the stream URL", async () => {
+    const fetch = mockStreamFetch({ pieces: [] });
+
+    await collect(streamingProvider("google").stream(geminiRequest("a/b?c")));
+
+    expect(fetch.mock.calls[0]?.[0]).toBe(
+      "https://generativelanguage.googleapis.com/v1beta/models/a%2Fb%3Fc:streamGenerateContent?alt=sse",
+    );
+  });
+
+  it("leaves usage null when the frame has none", async () => {
+    mockStreamFetch({ pieces: [sseData(geminiFrame("Hi"))] });
+
+    const [chunk] = await collect(streamingProvider("google").stream(geminiRequest()));
+
+    expect(chunk?.usage).toBeNull();
+  });
+
+  it("streams only the first candidate", async () => {
+    const frame = geminiFrame("first");
+    frame.candidates.push({ content: { role: "model", parts: [{ text: "second" }] } });
+    mockStreamFetch({ pieces: [sseData(frame)] });
+
+    const chunks = await collect(streamingProvider("google").stream(geminiRequest()));
+
+    expect(chunks.map((c) => c.choices[0]?.delta.content)).toEqual(["first"]);
+  });
+
+  it("skips a frame with no candidates and no block reason", async () => {
+    mockStreamFetch({ pieces: [sseData({ usageMetadata: { promptTokenCount: 3 } })] });
+
+    expect(await collect(streamingProvider("google").stream(geminiRequest()))).toEqual([]);
+  });
+
+  it.each([
+    ["MAX_TOKENS", "length"],
+    ["SAFETY", "content_filter"],
+    ["IMAGE_SAFETY", "stop"],
+  ])("maps finish reason %s to %s and keeps the original", async (original, mapped) => {
+    mockStreamFetch({ pieces: [sseData(geminiFrame("", original))] });
+
+    const [chunk] = await collect(streamingProvider("google").stream(geminiRequest()));
+
+    expect(chunk?.choices[0]?.finish_reason).toBe(mapped);
+    expect(chunk?.choices[0]?.provider_finish_reason).toBe(original);
+  });
+
+  it("reads frames sent with \\r\\n line endings", async () => {
+    mockStreamFetch({ pieces: [`data: ${JSON.stringify(geminiFrame("Hi", "STOP"))}\r\n\r\n`] });
+
+    const chunks = await collect(streamingProvider("google").stream(geminiRequest()));
+
+    expect(chunks.map((c) => c.choices[0]?.delta.content)).toEqual(["Hi"]);
+  });
+
+  it("retries the start of the stream", async () => {
+    const fetch = mockStreamFetch(
+      { status: 500 },
+      { pieces: [sseData(geminiFrame("Hi", "STOP"))] },
+    );
+
+    const chunks = await collect(streamingProvider("google").stream(geminiRequest()));
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(chunks).toHaveLength(1);
+  });
+
+  // New in the TS port: Python skips this frame, so the stream is empty.
+  it.each(["SAFETY", "BLOCKLIST", "OTHER"])(
+    "reports a prompt blocked with %s as one content_filter chunk",
+    async (blockReason) => {
+      mockStreamFetch({
+        pieces: [
+          sseData({
+            promptFeedback: { blockReason },
+            usageMetadata: { promptTokenCount: 8, totalTokenCount: 8 },
+          }),
+        ],
+      });
+
+      const chunks = await collect(streamingProvider("google").stream(geminiRequest()));
+
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0]?.choices).toEqual([
+        {
+          index: 0,
+          delta: { role: "assistant", content: null },
+          finish_reason: "content_filter",
+          provider_finish_reason: blockReason,
+        },
+      ]);
+      expect(chunks[0]?.usage).toEqual({ prompt_tokens: 8, completion_tokens: 0, total_tokens: 8 });
+      expect(chunks[0]?.error).toBeNull();
+    },
+  );
+});
