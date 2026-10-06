@@ -190,19 +190,20 @@ export class QwenProvider extends BaseProvider {
         usagePayload.total_tokens || usagePayload.input_tokens + usagePayload.output_tokens,
     };
 
+    // Skip frames that carry neither content nor a terminal signal, once the role is sent.
+    // (Python marks the role as sent before this check, so an empty first frame loses it.)
+    const sendRole = !state.roleSent;
+    if (!text && finishReason === null && usage === null && !sendRole) {
+      return null;
+    }
+
     const delta: Partial<ChoiceDelta> = {};
-    if (!state.roleSent) {
+    if (sendRole) {
       delta.role = Role.ASSISTANT;
       state.roleSent = true;
     }
     if (text) {
       delta.content = text;
-    }
-
-    // Skip frames that carry neither content nor a terminal signal. (As in Python, roleSent is
-    // already true here, so an empty first frame is skipped too and its role is not sent.)
-    if (!text && finishReason === null && usage === null && state.roleSent) {
-      return null;
     }
 
     // Prefer the per-frame request_id over the state's uuid placeholder.

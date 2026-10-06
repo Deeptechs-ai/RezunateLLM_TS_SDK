@@ -21,7 +21,13 @@ export async function* readLines(body: AsyncIterable<Uint8Array>): AsyncGenerato
   let buffer = "";
 
   for await (const bytes of body) {
-    buffer += decoder.decode(bytes, { stream: true });
+    const text = decoder.decode(bytes, { stream: true });
+    // Split only when a line can have ended, so a very long line is not re-split on every piece.
+    if (!LINE_BREAK.test(text) && !buffer.endsWith("\r")) {
+      buffer += text;
+      continue;
+    }
+    buffer += text;
     // A trailing "\r" may be the first half of "\r\n", so keep it until more text arrives.
     const end = buffer.endsWith("\r") ? buffer.length - 1 : buffer.length;
     const lines = buffer.slice(0, end).split(LINE_BREAK);

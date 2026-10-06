@@ -41,11 +41,35 @@ export interface ProviderOptions {
 export class HttpError extends Error {
   readonly status: number;
 
-  constructor(status: number, statusText: string, url: string) {
-    super(`${status} ${statusText} for url: ${url}`);
+  /** `providerMessage` is the provider's own explanation, e.g. "model not found", if it sent one. */
+  constructor(status: number, statusText: string, url: string, providerMessage?: string | null) {
+    super(
+      `${status} ${statusText} for url: ${url}${providerMessage ? ` - ${providerMessage}` : ""}`,
+    );
     this.name = "HttpError";
     this.status = status;
   }
+}
+
+/** The provider's error message from a failed response, read from its body if possible. */
+async function providerErrorMessage(response: Response): Promise<string | null> {
+  let text: string;
+  try {
+    text = (await response.text()).trim();
+  } catch {
+    return null;
+  }
+  try {
+    // OpenAI, Anthropic and Gemini use { error: { message } }; DashScope uses { message }.
+    const body = JSON.parse(text) as { error?: { message?: unknown }; message?: unknown };
+    const message = body?.error?.message ?? body?.message;
+    if (typeof message === "string" && message) {
+      return message;
+    }
+  } catch {
+    // Not JSON: fall back to the raw text.
+  }
+  return text ? text.slice(0, 500) : null;
 }
 
 /**
@@ -109,23 +133,34 @@ function timeoutError(): DOMException {
 }
 
 /**
- * Pass the body through, aborting when no data arrives for `ms` milliseconds.
+ * Pass a stream through, aborting its request when nothing arrives for `ms` milliseconds.
  * Like httpx's read timeout: a long stream is fine as long as data keeps coming.
  */
-async function* withIdleTimeout(
-  body: AsyncIterable<Uint8Array>,
+export async function* withIdleTimeout<T>(
+  items: AsyncIterable<T>,
   controller: AbortController,
   ms: number,
-): AsyncGenerator<Uint8Array> {
-  const iterator = body[Symbol.asyncIterator]();
+): AsyncGenerator<T> {
+  const iterator = items[Symbol.asyncIterator]();
   try {
     while (true) {
-      const timer = setTimeout(() => controller.abort(timeoutError()), ms);
-      let result: IteratorResult<Uint8Array>;
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort(timeoutError());
+      }, ms);
+      let result: IteratorResult<T>;
       try {
         result = await iterator.next();
+      } catch (error) {
+        // Libraries may report the abort as their own error; report it as the timeout it was.
+        throw timedOut ? timeoutError() : error;
       } finally {
         clearTimeout(timer);
+      }
+      // The openai SDK ends its stream quietly when aborted, which would look like a full answer.
+      if (timedOut) {
+        throw timeoutError();
       }
       if (result.done) {
         return;
@@ -139,7 +174,7 @@ async function* withIdleTimeout(
 }
 
 /** The `error` field shared by error responses and error chunks. */
-function errorInfo(error: unknown): ErrorInfo {
+function errorInfo(error: unknown, type = "api_error"): ErrorInfo {
   const retriesAttempted =
     error !== null && typeof error === "object" && RETRIES_ATTEMPTED in error
       ? (error as { [RETRIES_ATTEMPTED]: number })[RETRIES_ATTEMPTED]
@@ -147,17 +182,21 @@ function errorInfo(error: unknown): ErrorInfo {
 
   return {
     message: error instanceof Error ? error.message : String(error),
-    type: "api_error",
+    type,
     code: statusCodeOf(error),
     retries_attempted: retriesAttempted,
   };
 }
 
-/** Terminal-error chunk; also used by the gateway when no provider could be created. */
+/**
+ * Terminal-error chunk; also used by the gateway when no provider could be created.
+ * `type` is "api_error" for provider and network failures, "invalid_request_error" for bad input.
+ */
 export function makeErrorChunk(
   error: unknown,
   model: string | null = null,
   provider: Provider | null = null,
+  type = "api_error",
 ): ChatCompletionChunk {
   return {
     id: null,
@@ -167,7 +206,7 @@ export function makeErrorChunk(
     choices: [],
     usage: null,
     provider,
-    error: errorInfo(error),
+    error: errorInfo(error, type),
   };
 }
 
@@ -348,7 +387,8 @@ export abstract class BaseProvider {
       signal: AbortSignal.timeout(this.timeout * 1000),
     });
     if (!response.ok) {
-      throw new HttpError(response.status, response.statusText, url);
+      const message = await providerErrorMessage(response);
+      throw new HttpError(response.status, response.statusText, url, message);
     }
     const providerResponseData: unknown = await response.json();
 
@@ -392,6 +432,10 @@ export abstract class BaseProvider {
         const chunk = this.translateFrame(event, data, state);
         if (chunk) {
           yield chunk;
+          // An error chunk is the last chunk of a stream.
+          if (chunk.error) {
+            return;
+          }
         }
       }
     } catch (error) {
@@ -497,8 +541,8 @@ export abstract class BaseProvider {
       clearTimeout(timer);
     }
     if (!response.ok || !response.body) {
-      await response.body?.cancel();
-      throw new HttpError(response.status, response.statusText, url);
+      const message = await providerErrorMessage(response);
+      throw new HttpError(response.status, response.statusText, url, message);
     }
     return readLines(withIdleTimeout(response.body, controller, ms));
   }

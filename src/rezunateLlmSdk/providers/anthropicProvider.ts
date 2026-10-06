@@ -148,7 +148,11 @@ export class AnthropicProvider extends BaseProvider {
       return null;
     }
 
-    const payload = AnthropicStreamEventSchema.parse(BaseProvider.parseJsonFrame(data) ?? {});
+    const parsed = AnthropicStreamEventSchema.safeParse(BaseProvider.parseJsonFrame(data) ?? {});
+    if (!parsed.success) {
+      throw new Error(`Invalid Anthropic "${event}" event: ${parsed.error.message}`);
+    }
+    const payload = parsed.data;
 
     if (event === "message_start") {
       state.id = payload.message?.id || state.id;

@@ -452,6 +452,28 @@ describe.each([
 });
 
 describe("OpenAI-compatible stream details", () => {
+  it("ends with a timeout error chunk when the stream goes silent", async () => {
+    mockStreamFetch({ pieces: [sseData(sdkChunk({ content: "Hel" }))], hang: true });
+    const provider = getProvider("openai", mockApiKey, { timeout: 0.05 });
+
+    const chunks = await collect(provider.stream(hiRequest("gpt-4")));
+
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0]?.choices[0]?.delta.content).toBe("Hel");
+    expect(chunks[1]?.error?.message).toContain("timeout");
+  });
+
+  it("does not cut off a stream that keeps sending data", async () => {
+    const frame = sseData(sdkChunk({ content: "." }));
+    mockStreamFetch({ pieces: [frame, 40, frame, 40, frame, 40, frame, DONE] });
+    const provider = getProvider("openai", mockApiKey, { timeout: 0.1 });
+
+    const chunks = await collect(provider.stream(hiRequest("gpt-4")));
+
+    expect(chunks).toHaveLength(4);
+    expect(chunks.every((c) => c.error === null)).toBe(true);
+  });
+
   it("maps a provider-only finish reason and keeps the original", async () => {
     mockStreamFetch({ pieces: [sseData(sdkChunk({}, "insufficient_system_resource")), DONE] });
 
@@ -529,6 +551,7 @@ describe("chatComplete with stream: true", () => {
     expect(fetch).not.toHaveBeenCalled();
     expect(chunks).toHaveLength(1);
     expect(chunks[0]).toMatchObject({ model: "gpt-4", provider: null, choices: [] });
+    expect(chunks[0]?.error?.type).toBe("invalid_request_error");
     expect(chunks[0]?.error?.message).toContain("nope");
   });
 
@@ -551,7 +574,7 @@ describe("chatComplete with stream: true", () => {
     );
 
     expect(chunks).toHaveLength(1);
-    expect(chunks[0]?.error).toMatchObject({ code: 401, retries_attempted: 0 });
+    expect(chunks[0]?.error).toMatchObject({ code: 401, retries_attempted: 0, type: "api_error" });
   });
 
   it("still throws for an invalid request without stream", async () => {
@@ -1006,13 +1029,18 @@ describe("qwen streaming", () => {
     expect(chunks).toHaveLength(1);
   });
 
-  // Kept from Python: the role is marked as sent before the empty-frame check.
-  it("drops the role when the first frame is empty, as Python does", async () => {
-    mockStreamFetch({ pieces: [qwenFrame(1, "", "null", null), qwenFrame(2, "Hi")] });
+  // Python loses the role here (it marks the role as sent before the empty-frame check).
+  it("sends the role even when the first frame is empty", async () => {
+    mockStreamFetch({
+      pieces: [qwenFrame(1, "", "null", null), qwenFrame(2, "", "null", null), qwenFrame(3, "Hi")],
+    });
 
     const chunks = await collect(streamingProvider("qwen").stream(hiRequest("qwen-plus")));
 
-    expect(chunks.map((c) => c.choices[0]?.delta)).toEqual([{ role: null, content: "Hi" }]);
+    expect(chunks.map((c) => c.choices[0]?.delta)).toEqual([
+      { role: "assistant", content: null },
+      { role: null, content: "Hi" },
+    ]);
   });
 
   it("maps an unknown finish reason to stop and keeps the original", async () => {
@@ -1048,5 +1076,41 @@ describe("qwen streaming", () => {
     expect(fetch).not.toHaveBeenCalled();
     expect(chunks).toHaveLength(1);
     expect(chunks[0]?.error?.message).toContain("Invalid Qwen workspaceId");
+  });
+});
+
+describe("stream error details", () => {
+  it("includes the provider's error message when the stream cannot start", async () => {
+    mockStreamFetch({ status: 400 });
+
+    const [chunk] = await collect(streamingProvider("anthropic").stream(anthropicRequest()));
+
+    expect(chunk?.error?.code).toBe(400);
+    expect(chunk?.error?.message).toContain("- Request failed");
+  });
+
+  it("ends the stream right after an error chunk", async () => {
+    mockStreamFetch({
+      pieces: [
+        sseEvent("error", { error: { message: "Overloaded" } }),
+        sseEvent("content_block_delta", { delta: { type: "text_delta", text: "late" } }),
+        sseEvent("message_stop", {}),
+      ],
+    });
+
+    const chunks = await collect(streamingProvider("anthropic").stream(anthropicRequest()));
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.error?.message).toBe("Overloaded");
+  });
+
+  it("names the Anthropic event when a frame is malformed", async () => {
+    mockStreamFetch({
+      pieces: [sseEvent("message_delta", { usage: { output_tokens: "many" } })],
+    });
+
+    const [chunk] = await collect(streamingProvider("anthropic").stream(anthropicRequest()));
+
+    expect(chunk?.error?.message).toContain('Invalid Anthropic "message_delta" event');
   });
 });

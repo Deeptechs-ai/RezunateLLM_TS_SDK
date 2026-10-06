@@ -60,7 +60,12 @@ async function* streamChat(options: ChatCompleteOptions): AsyncGenerator<ChatCom
     providerInstance = createProvider(options, request);
   } catch (error) {
     const model = options.request?.model;
-    yield makeErrorChunk(error, typeof model === "string" ? model : null);
+    yield makeErrorChunk(
+      error,
+      typeof model === "string" ? model : null,
+      null,
+      "invalid_request_error",
+    );
     return;
   }
   yield* providerInstance.stream(request);

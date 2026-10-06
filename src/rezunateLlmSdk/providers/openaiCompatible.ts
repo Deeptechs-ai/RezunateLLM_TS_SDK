@@ -10,7 +10,7 @@ import {
   ChatCompletionResponseSchema,
   mapFinishReason,
 } from "../models";
-import { BaseProvider, dropNones } from "./base";
+import { BaseProvider, dropNones, withIdleTimeout } from "./base";
 import { OPENAI_CHAT_ENDPOINT } from "./endpoints";
 
 /**
@@ -88,10 +88,13 @@ export abstract class OpenAICompatibleProvider extends BaseProvider {
     try {
       // Passed as the SDK's param type, for the same reason as in `sendRequest`.
       const params = { ...dropNones(request), stream: true } as ChatCompletionCreateParamsStreaming;
+      const ms = this.timeout * 1000;
+      // The SDK's timeout covers only the start; the idle timeout aborts a stream that goes silent.
+      const controller = new AbortController();
       const sdkStream = await this.withRetries(() =>
-        this.client.chat.completions.create(params, { timeout: this.timeout * 1000 }),
+        this.client.chat.completions.create(params, { timeout: ms, signal: controller.signal }),
       );
-      for await (const sdkChunk of sdkStream) {
+      for await (const sdkChunk of withIdleTimeout(sdkStream, controller, ms)) {
         const chunk = ChatCompletionChunkSchema.parse(withMappedFinishReasons(sdkChunk));
         chunk.provider = this.providerName;
         yield chunk;

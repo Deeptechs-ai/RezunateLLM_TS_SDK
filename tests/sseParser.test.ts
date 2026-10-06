@@ -141,6 +141,20 @@ describe("readLines", () => {
     expect(lines).toEqual(["a", "b"]);
   });
 
+  it("joins a long line sent in many pieces", async () => {
+    const pieces = Array.from({ length: 1000 }, () => "x");
+
+    const lines = await collect(readLines(bytes("data: ", ...pieces, "\n")));
+
+    expect(lines).toEqual([`data: ${"x".repeat(1000)}`]);
+  });
+
+  it("splits \\r-only line endings across pieces", async () => {
+    const lines = await collect(readLines(bytes("a\r", "b\r", "c")));
+
+    expect(lines).toEqual(["a", "b", "c"]);
+  });
+
   it("yields nothing for an empty body", async () => {
     expect(await collect(readLines(bytes()))).toEqual([]);
   });

@@ -137,7 +137,7 @@ Every provider sends chunks in the OpenAI format (`object: "chat.completion.chun
 
 How problems are reported:
 
-- **Everything comes as a chunk.** With `stream: true` nothing throws, not even for an invalid request or an unknown provider: you get one chunk with `error` set (`message`, `code`, `retries_attempted`) and empty `choices`, and the stream ends.
+- **Everything comes as a chunk.** With `stream: true` nothing throws, not even for an invalid request or an unknown provider: you get one chunk with `error` set (`message`, `code`, `retries_attempted`) and empty `choices`, and the stream ends. `error.type` is `"invalid_request_error"` when your request was the problem, and `"api_error"` when the provider or the network failed.
 - **Only the start is retried.** If the stream cannot be opened (429, 5xx, timeout, connection error), it is retried with the [same rule](#retries) as normal chat. Once text has arrived it is never retried, because that would repeat the text; the stream ends with an error chunk instead, after the chunks already sent.
 - **The timeout counts silence, not total time.** A stream fails only when no data arrives for `timeout` seconds, so long answers are not cut off.
 
@@ -249,6 +249,7 @@ The TypeScript SDK is meant to behave like the Python SDK. These differences are
 7. **TypeScript naming and style.** Functions and options use camelCase (`chatComplete`, `apiKey`), and the inputs are passed as one object (`chatComplete({ provider, apiKey, request })`). JSON fields sent to and received from providers keep their original names (`max_tokens`, `finish_reason`, and so on).
 8. **The start of a stream is retried, for every provider.** In Python, Anthropic, Google and Qwen streams are never retried, and OpenAI-format streams are retried by the `openai` library with its own rules.
 9. **Stream problems never throw.** With `stream: true`, every problem, including an invalid request or an unknown provider, comes as an error chunk. In Python, an invalid streaming request throws, and only provider and network failures come as error chunks.
+10. **Error messages include the provider's explanation.** When a provider rejects a request, `error.message` adds the provider's own message (for example `404 Not Found for url: … - model: xyz`), in normal chat and in streams. In Python, Anthropic, Google and Qwen errors have only the status and the URL; the OpenAI-format providers include the message in both.
 
 ## Known limitations
 
