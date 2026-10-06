@@ -241,6 +241,11 @@ export function mockStreamFetch(...replies: FakeStreamReply[]) {
   return fake;
 }
 
+/** One SSE frame with an `event:` name and JSON-encoded `data:`. */
+export function sseEvent(event: string, data: unknown): string {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
 /** SSE text with one `data:` frame per event, each JSON-encoded. */
 export function sseData(...events: unknown[]): string {
   return events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");

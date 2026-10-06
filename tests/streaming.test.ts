@@ -19,7 +19,7 @@ import {
   type StreamRequest,
   type StreamState,
 } from "../src/rezunateLlmSdk/providers/base";
-import { mockApiKey, mockStreamFetch, sseData } from "./fixtures";
+import { mockApiKey, mockStreamFetch, sseData, sseEvent } from "./fixtures";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -562,5 +562,178 @@ describe("chatComplete with stream: true", () => {
         request: { ...streamRequest, stream: false },
       }),
     ).rejects.toThrow();
+  });
+});
+
+/** A full Anthropic stream for "Hello", ending with the given stop reason. */
+function anthropicStream(stopReason = "end_turn"): string[] {
+  return [
+    sseEvent("message_start", {
+      type: "message_start",
+      message: { id: "msg_123", model: "claude-haiku-4-5-20251001", usage: { input_tokens: 10 } },
+    }),
+    sseEvent("content_block_start", { type: "content_block_start", index: 0 }),
+    sseEvent("ping", { type: "ping" }),
+    sseEvent("content_block_delta", { delta: { type: "text_delta", text: "Hel" } }),
+    sseEvent("content_block_delta", { delta: { type: "text_delta", text: "lo" } }),
+    sseEvent("content_block_stop", { type: "content_block_stop", index: 0 }),
+    sseEvent("message_delta", { delta: { stop_reason: stopReason }, usage: { output_tokens: 5 } }),
+    sseEvent("message_stop", { type: "message_stop" }),
+  ];
+}
+
+function anthropicRequest() {
+  return ChatCompletionRequestSchema.parse({
+    model: "claude-haiku-4-5",
+    messages: [
+      { role: "system", content: "Be brief." },
+      { role: "user", content: "Hi" },
+    ],
+    stream: true,
+  });
+}
+
+describe("anthropic streaming", () => {
+  it("turns Anthropic events into chunks", async () => {
+    mockStreamFetch({ pieces: anthropicStream() });
+
+    const chunks = await collect(streamingProvider("anthropic").stream(anthropicRequest()));
+
+    expect(chunks.map((c) => c.choices[0]?.delta)).toEqual([
+      { role: "assistant", content: "" },
+      { role: null, content: "Hel" },
+      { role: null, content: "lo" },
+      { role: null, content: null },
+    ]);
+    expect(chunks.every((c) => c.id === "msg_123" && c.provider === "anthropic")).toBe(true);
+    expect(chunks[0]?.model).toBe("claude-haiku-4-5-20251001");
+    expect(chunks[3]?.choices[0]?.finish_reason).toBe("stop");
+    expect(chunks[3]?.choices[0]?.provider_finish_reason).toBe("end_turn");
+    expect(chunks[3]?.usage).toEqual({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 });
+  });
+
+  it("POSTs the Anthropic request with stream: true", async () => {
+    const fetch = mockStreamFetch({ pieces: anthropicStream() });
+
+    await collect(streamingProvider("anthropic").stream(anthropicRequest()));
+
+    const [url, init] = fetch.mock.calls[0] ?? [];
+    expect(url).toBe("https://api.anthropic.com/v1/messages");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      model: "claude-haiku-4-5",
+      max_tokens: 1024,
+      messages: [{ role: "user", content: "Hi" }],
+      system: "Be brief.",
+      stream: true,
+    });
+    expect(init?.headers).toMatchObject({ "x-api-key": mockApiKey });
+  });
+
+  it("sends the workspace header when a workspace is set", async () => {
+    const fetch = mockStreamFetch({ pieces: anthropicStream() });
+    const provider = getProvider("anthropic", mockApiKey, { workspaceId: "wrkspc_1" });
+
+    await collect(provider.stream(anthropicRequest()));
+
+    expect(fetch.mock.calls[0]?.[1]?.headers).toMatchObject({
+      "anthropic-workspace-id": "wrkspc_1",
+    });
+  });
+
+  it("stops at message_stop", async () => {
+    mockStreamFetch({
+      pieces: [
+        ...anthropicStream(),
+        sseEvent("content_block_delta", { delta: { type: "text_delta", text: "late" } }),
+      ],
+    });
+
+    const chunks = await collect(streamingProvider("anthropic").stream(anthropicRequest()));
+
+    expect(chunks).toHaveLength(4);
+  });
+
+  it("skips non-text and empty deltas", async () => {
+    mockStreamFetch({
+      pieces: [
+        sseEvent("content_block_delta", { delta: { type: "thinking_delta", thinking: "hmm" } }),
+        sseEvent("content_block_delta", { delta: { type: "input_json_delta", partial_json: "{" } }),
+        sseEvent("content_block_delta", { delta: { type: "text_delta", text: "" } }),
+        sseEvent("message_stop", {}),
+      ],
+    });
+
+    const chunks = await collect(streamingProvider("anthropic").stream(anthropicRequest()));
+
+    expect(chunks).toEqual([]);
+  });
+
+  it.each([
+    ["max_tokens", "length"],
+    ["refusal", "content_filter"],
+    ["a_new_reason", "stop"],
+  ])("maps stop reason %s to %s and keeps the original", async (original, mapped) => {
+    mockStreamFetch({ pieces: anthropicStream(original) });
+
+    const chunks = await collect(streamingProvider("anthropic").stream(anthropicRequest()));
+
+    expect(chunks[3]?.choices[0]?.finish_reason).toBe(mapped);
+    expect(chunks[3]?.choices[0]?.provider_finish_reason).toBe(original);
+  });
+
+  it("turns an error event into an error chunk", async () => {
+    mockStreamFetch({
+      pieces: [
+        anthropicStream()[0] ?? "",
+        sseEvent("error", {
+          type: "error",
+          error: { type: "overloaded_error", message: "Overloaded" },
+        }),
+      ],
+    });
+
+    const chunks = await collect(streamingProvider("anthropic").stream(anthropicRequest()));
+
+    expect(chunks).toHaveLength(2);
+    expect(chunks[1]).toMatchObject({
+      model: "claude-haiku-4-5-20251001",
+      provider: "anthropic",
+      error: { message: "Overloaded" },
+    });
+  });
+
+  it("uses a default message when the error event has none", async () => {
+    mockStreamFetch({ pieces: [sseEvent("error", {})] });
+
+    const [chunk] = await collect(streamingProvider("anthropic").stream(anthropicRequest()));
+
+    expect(chunk?.error?.message).toBe("anthropic stream error");
+  });
+
+  it("retries the start of the stream", async () => {
+    const fetch = mockStreamFetch({ status: 503 }, { pieces: anthropicStream() });
+
+    const chunks = await collect(streamingProvider("anthropic").stream(anthropicRequest()));
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(chunks).toHaveLength(4);
+  });
+
+  it("streams through chatComplete", async () => {
+    mockStreamFetch({ pieces: anthropicStream() });
+
+    const chunks = await collect(
+      chatComplete({
+        provider: "anthropic",
+        apiKey: mockApiKey,
+        request: {
+          model: "claude-haiku-4-5",
+          messages: [{ role: "user", content: "Hi" }],
+          stream: true,
+        },
+      }),
+    );
+
+    expect(chunks.map((c) => c.choices[0]?.delta.content).join("")).toBe("Hello");
   });
 });

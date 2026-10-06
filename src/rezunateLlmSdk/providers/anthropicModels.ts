@@ -114,3 +114,24 @@ export const AnthropicResponseSchema = z.object({
   usage: AnthropicUsageSchema.default(() => ({ input_tokens: 0, output_tokens: 0 })),
 });
 export type AnthropicResponse = z.infer<typeof AnthropicResponseSchema>;
+
+/** The fields we read from Anthropic stream events; anything else is ignored. */
+export const AnthropicStreamEventSchema = z.looseObject({
+  message: z
+    .looseObject({
+      id: z.string().nullish(),
+      model: z.string().nullish(),
+      usage: z.looseObject({ input_tokens: z.number().int().nullish() }).nullish(),
+    })
+    .nullish(),
+  delta: z
+    .looseObject({
+      type: z.string().nullish(),
+      text: z.string().nullish(),
+      stop_reason: z.string().nullish(),
+    })
+    .nullish(),
+  usage: z.looseObject({ output_tokens: z.number().int().nullish() }).nullish(),
+  error: z.looseObject({ type: z.string().nullish(), message: z.string().nullish() }).nullish(),
+});
+export type AnthropicStreamEvent = z.infer<typeof AnthropicStreamEventSchema>;
