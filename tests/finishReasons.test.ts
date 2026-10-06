@@ -40,15 +40,10 @@ describe("mapFinishReason", () => {
     ["refusal", "content_filter"],
     ["model_context_window_exceeded", "length"],
     ["pause_turn", "stop"],
-    ["IMAGE_SAFETY", "content_filter"],
-    ["IMAGE_PROHIBITED_CONTENT", "content_filter"],
-    ["IMAGE_RECITATION", "content_filter"],
     ["UNEXPECTED_TOOL_CALL", "stop"],
     ["TOO_MANY_TOOL_CALLS", "stop"],
     ["CONTINUATION", "length"],
     ["LANGUAGE", "stop"],
-    ["NO_IMAGE", "stop"],
-    ["IMAGE_OTHER", "stop"],
     ["FINISH_REASON_UNSPECIFIED", "stop"],
     ["aborted", "stop"],
   ])("translates the new value %s to %s", (reason, expected) => {
@@ -64,6 +59,16 @@ describe("mapFinishReason", () => {
     ["insufficient_system_resource", "stop"],
   ])("keeps translating the existing value %s to %s", (reason, expected) => {
     expect(mapFinishReason(reason)).toBe(expected);
+  });
+
+  it.each([
+    "IMAGE_SAFETY",
+    "IMAGE_PROHIBITED_CONTENT",
+    "IMAGE_RECITATION",
+    "IMAGE_OTHER",
+    "NO_IMAGE",
+  ])("does not translate the image-only Gemini value %s (the SDK is text-only)", (reason) => {
+    expect(mapFinishReason(reason)).toBe("stop");
   });
 
   it("falls back to stop for an unknown or missing value", () => {

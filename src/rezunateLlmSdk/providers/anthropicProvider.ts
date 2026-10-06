@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto";
 import * as constants from "../constants";
 import {
+  type ChatCompletionChunk,
   type ChatCompletionRequest,
   type ChatCompletionResponse,
   mapFinishReason,
@@ -17,12 +18,14 @@ import {
   type AnthropicRequest,
   AnthropicRequestSchema,
   AnthropicResponseSchema,
+  AnthropicStreamEventSchema,
 } from "./anthropicModels";
-import { BaseProvider } from "./base";
+import { BaseProvider, type StreamRequest, type StreamState } from "./base";
 import {
   ANTHROPIC_BASE_URL,
   ANTHROPIC_DEFAULT_VERSION,
   ANTHROPIC_MESSAGES_ENDPOINT,
+  getUrl,
 } from "./endpoints";
 
 /** Anthropic provider: handles transformation between OpenAI and Anthropic formats. */
@@ -123,5 +126,66 @@ export class AnthropicProvider extends BaseProvider {
       provider: this.providerName,
       error: null,
     };
+  }
+
+  // ---- streaming hooks (driven by BaseProvider.stream) ----
+
+  protected override buildStreamRequest(request: ChatCompletionRequest): StreamRequest {
+    const body = { ...this.transformRequest(request), stream: true };
+    return { url: getUrl(this.baseUrl, this.getEndpoint()), body, headers: this.getHeaders() };
+  }
+
+  protected override isStreamTerminator(event: string): boolean {
+    return event === "message_stop";
+  }
+
+  protected override translateFrame(
+    event: string,
+    data: string,
+    state: StreamState,
+  ): ChatCompletionChunk | null {
+    if (event === "ping" || event === "content_block_start" || event === "content_block_stop") {
+      return null;
+    }
+
+    const parsed = AnthropicStreamEventSchema.safeParse(BaseProvider.parseJsonFrame(data) ?? {});
+    if (!parsed.success) {
+      throw new Error(`Invalid Anthropic "${event}" event: ${parsed.error.message}`);
+    }
+    const payload = parsed.data;
+
+    if (event === "message_start") {
+      state.id = payload.message?.id || state.id;
+      state.model = payload.message?.model || state.model;
+      state.inputTokens = payload.message?.usage?.input_tokens ?? 0;
+      return this.makeChunk(state, { delta: { role: Role.ASSISTANT, content: "" } });
+    }
+
+    if (event === "content_block_delta") {
+      const text = payload.delta?.text;
+      if (payload.delta?.type === "text_delta" && text) {
+        return this.makeChunk(state, { delta: { content: text } });
+      }
+      return null;
+    }
+
+    if (event === "message_delta") {
+      const outputTokens = payload.usage?.output_tokens ?? 0;
+      return this.makeChunk(state, {
+        finishReason: payload.delta?.stop_reason ?? null,
+        usage: {
+          prompt_tokens: state.inputTokens,
+          completion_tokens: outputTokens,
+          total_tokens: state.inputTokens + outputTokens,
+        },
+      });
+    }
+
+    if (event === "error") {
+      const message = payload.error?.message || "anthropic stream error";
+      return this.errorChunk(new Error(message), state.model);
+    }
+
+    return null;
   }
 }

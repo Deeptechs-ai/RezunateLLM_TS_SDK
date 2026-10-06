@@ -176,3 +176,77 @@ export function mockFetch(...replies: FakeReply[]) {
   vi.stubGlobal("fetch", fake);
   return fake;
 }
+
+/**
+ * One fake streaming reply. `pieces` are sent in order: a string is body text, a number waits
+ * that many ms, an Error breaks the stream. `hang` keeps the stream open after the last piece.
+ */
+export interface FakeStreamReply {
+  pieces?: (string | number | Error)[];
+  hang?: boolean;
+  status?: number;
+  throws?: Error;
+  onCancel?: () => void;
+}
+
+/** Replace the global `fetch` with a fake that answers with SSE streams, one reply per call. */
+export function mockStreamFetch(...replies: FakeStreamReply[]) {
+  const queue = [...replies];
+  const fake = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+    const reply = queue.shift();
+    if (!reply) {
+      throw new Error("mockStreamFetch: no more fake replies queued");
+    }
+    if (reply.throws) {
+      throw reply.throws;
+    }
+    if (reply.status !== undefined && reply.status !== 200) {
+      return new Response(JSON.stringify({ error: { message: "Request failed" } }), {
+        status: reply.status,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const encoder = new TextEncoder();
+    const pieces = [...(reply.pieces ?? [])];
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        // Like real fetch: aborting the request breaks the body.
+        init?.signal?.addEventListener("abort", () => controller.error(init.signal?.reason));
+      },
+      async pull(controller) {
+        let piece = pieces.shift();
+        while (typeof piece === "number") {
+          await new Promise((resolve) => setTimeout(resolve, piece as number));
+          piece = pieces.shift();
+        }
+        if (piece === undefined) {
+          if (reply.hang) {
+            return new Promise<void>(() => {});
+          }
+          controller.close();
+        } else if (piece instanceof Error) {
+          controller.error(piece);
+        } else {
+          controller.enqueue(encoder.encode(piece));
+        }
+      },
+      cancel() {
+        reply.onCancel?.();
+      },
+    });
+    return new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+  });
+  vi.stubGlobal("fetch", fake);
+  return fake;
+}
+
+/** One SSE frame with an `event:` name and JSON-encoded `data:`. */
+export function sseEvent(event: string, data: unknown): string {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+/** SSE text with one `data:` frame per event, each JSON-encoded. */
+export function sseData(...events: unknown[]): string {
+  return events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
+}
