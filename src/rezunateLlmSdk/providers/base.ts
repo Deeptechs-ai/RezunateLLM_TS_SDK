@@ -138,6 +138,39 @@ async function* withIdleTimeout(
   }
 }
 
+/** The `error` field shared by error responses and error chunks. */
+function errorInfo(error: unknown): ErrorInfo {
+  const retriesAttempted =
+    error !== null && typeof error === "object" && RETRIES_ATTEMPTED in error
+      ? (error as { [RETRIES_ATTEMPTED]: number })[RETRIES_ATTEMPTED]
+      : null;
+
+  return {
+    message: error instanceof Error ? error.message : String(error),
+    type: "api_error",
+    code: statusCodeOf(error),
+    retries_attempted: retriesAttempted,
+  };
+}
+
+/** Terminal-error chunk; also used by the gateway when no provider could be created. */
+export function makeErrorChunk(
+  error: unknown,
+  model: string | null = null,
+  provider: Provider | null = null,
+): ChatCompletionChunk {
+  return {
+    id: null,
+    object: "chat.completion.chunk",
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [],
+    usage: null,
+    provider,
+    error: errorInfo(error),
+  };
+}
+
 /** Per-stream state passed to the translation hooks. */
 export interface StreamState {
   id: string;
@@ -336,22 +369,7 @@ export abstract class BaseProvider {
       choices: [],
       usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
       provider: this.providerName,
-      error: this.errorInfo(error),
-    };
-  }
-
-  /** The `error` field shared by error responses and error chunks. */
-  protected errorInfo(error: unknown): ErrorInfo {
-    const retriesAttempted =
-      error !== null && typeof error === "object" && RETRIES_ATTEMPTED in error
-        ? (error as { [RETRIES_ATTEMPTED]: number })[RETRIES_ATTEMPTED]
-        : null;
-
-    return {
-      message: error instanceof Error ? error.message : String(error),
-      type: "api_error",
-      code: statusCodeOf(error),
-      retries_attempted: retriesAttempted,
+      error: errorInfo(error),
     };
   }
 
@@ -451,16 +469,7 @@ export abstract class BaseProvider {
 
   /** Terminal-error chunk, with the same `error` field as `handleError`. */
   protected errorChunk(error: unknown, model?: string | null): ChatCompletionChunk {
-    return {
-      id: null,
-      object: "chat.completion.chunk",
-      created: Math.floor(Date.now() / 1000),
-      model: model ?? null,
-      choices: [],
-      usage: null,
-      provider: this.providerName,
-      error: this.errorInfo(error),
-    };
+    return makeErrorChunk(error, model ?? null, this.providerName);
   }
 
   /**

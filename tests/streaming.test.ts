@@ -3,6 +3,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { chatComplete } from "../src/rezunateLlmSdk/gateway";
 import {
   type ChatCompletionChunk,
   ChatCompletionChunkSchema,
@@ -12,6 +13,7 @@ import {
   ChoiceChunkSchema,
   type Provider,
 } from "../src/rezunateLlmSdk/models";
+import { getProvider } from "../src/rezunateLlmSdk/providers";
 import {
   BaseProvider,
   type StreamRequest,
@@ -366,5 +368,199 @@ describe("parseJsonFrame", () => {
     ['{"a":1}', { a: 1 }],
   ])("parses %j", (data, expected) => {
     expect(TestStreamProvider.parseJson(data)).toEqual(expected);
+  });
+});
+
+/** One chunk in the OpenAI streaming format, as the providers send it. */
+function sdkChunk(delta: object, finishReason: string | null = null, extra: object = {}) {
+  return {
+    id: "chatcmpl-abc",
+    object: "chat.completion.chunk",
+    created: 1700000000,
+    model: "the-model",
+    choices: [{ index: 0, delta, finish_reason: finishReason, logprobs: null }],
+    ...extra,
+  };
+}
+
+const helloStream = [
+  sseData(
+    sdkChunk({ role: "assistant", content: "" }),
+    sdkChunk({ content: "Hello" }),
+    sdkChunk({}, "stop"),
+  ),
+  DONE,
+];
+
+function streamingProvider(name: string, maxRetries = 3) {
+  return getProvider(name, mockApiKey, { retryDelay: 0.01, maxRetries });
+}
+
+describe.each([
+  ["openai", "gpt-4", "https://api.openai.com/v1/chat/completions"],
+  ["grok", "grok-3-mini", "https://api.x.ai/v1/chat/completions"],
+  ["deepseek", "deepseek-chat", "https://api.deepseek.com/v1/chat/completions"],
+  ["meta", "muse-spark-1.3", "https://api.meta.ai/v1/chat/completions"],
+])("%s streaming (OpenAI-compatible)", (name, model, url) => {
+  it("yields the provider's chunks in our format", async () => {
+    mockStreamFetch({ pieces: helloStream });
+
+    const chunks = await collect(streamingProvider(name).stream(hiRequest(model)));
+
+    expect(chunks.map((c) => c.choices[0]?.delta.content)).toEqual(["", "Hello", null]);
+    expect(chunks[0]?.choices[0]?.delta.role).toBe("assistant");
+    expect(chunks[2]?.choices[0]?.finish_reason).toBe("stop");
+    expect(chunks[2]?.choices[0]?.provider_finish_reason).toBe("stop");
+    expect(chunks.every((c) => c.id === "chatcmpl-abc" && c.provider === name)).toBe(true);
+  });
+
+  it("POSTs stream: true to the chat endpoint", async () => {
+    const fetch = mockStreamFetch({ pieces: helloStream });
+
+    await collect(streamingProvider(name).stream(hiRequest(model)));
+
+    const [sentUrl, init] = fetch.mock.calls[0] ?? [];
+    expect(String(sentUrl)).toBe(url);
+    const body = JSON.parse(String(init?.body));
+    expect(body).toMatchObject({ model, stream: true });
+    expect(body).not.toHaveProperty("temperature");
+  });
+
+  it("retries the start of the stream", async () => {
+    const fetch = mockStreamFetch({ status: 429 }, { pieces: helloStream });
+
+    const chunks = await collect(streamingProvider(name).stream(hiRequest(model)));
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(chunks).toHaveLength(3);
+  });
+
+  it("gives up after maxRetries with one error chunk", async () => {
+    const fetch = mockStreamFetch({ status: 429 }, { status: 429 });
+
+    const chunks = await collect(streamingProvider(name, 1).stream(hiRequest(model)));
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).toMatchObject({
+      model,
+      provider: name,
+      choices: [],
+      error: { code: 429, retries_attempted: 1 },
+    });
+  });
+});
+
+describe("OpenAI-compatible stream details", () => {
+  it("maps a provider-only finish reason and keeps the original", async () => {
+    mockStreamFetch({ pieces: [sseData(sdkChunk({}, "insufficient_system_resource")), DONE] });
+
+    const [chunk] = await collect(streamingProvider("deepseek").stream(hiRequest("deepseek-chat")));
+
+    expect(chunk?.choices[0]?.finish_reason).toBe("stop");
+    expect(chunk?.choices[0]?.provider_finish_reason).toBe("insufficient_system_resource");
+  });
+
+  it("drops fields our chunk model does not have", async () => {
+    mockStreamFetch({
+      pieces: [
+        sseData(sdkChunk({ content: "Hi", refusal: null }, null, { system_fingerprint: "fp" })),
+        DONE,
+      ],
+    });
+
+    const [chunk] = await collect(streamingProvider("openai").stream(hiRequest("gpt-4")));
+
+    expect(chunk).not.toHaveProperty("system_fingerprint");
+    expect(chunk?.choices[0]).not.toHaveProperty("logprobs");
+    expect(chunk?.choices[0]?.delta).toEqual({ role: null, content: "Hi" });
+  });
+
+  it("passes the final usage chunk through", async () => {
+    const usage = { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 };
+    mockStreamFetch({
+      pieces: [sseData({ ...sdkChunk({}), choices: [], usage }), DONE],
+    });
+
+    const [chunk] = await collect(streamingProvider("openai").stream(hiRequest("gpt-4")));
+
+    expect(chunk?.choices).toEqual([]);
+    expect(chunk?.usage).toEqual(usage);
+  });
+
+  it("ends with an error chunk when the stream breaks, without retrying", async () => {
+    const fetch = mockStreamFetch({
+      pieces: [sseData(sdkChunk({ content: "Hel" })), new TypeError("fetch failed")],
+    });
+
+    const chunks = await collect(streamingProvider("openai").stream(hiRequest("gpt-4")));
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0]?.choices[0]?.delta.content).toBe("Hel");
+    expect(chunks[1]?.error).not.toBeNull();
+  });
+});
+
+describe("chatComplete with stream: true", () => {
+  const streamRequest = {
+    model: "gpt-4",
+    messages: [{ role: "user" as const, content: "Hi" }],
+    stream: true as const,
+  };
+
+  it("returns the provider's chunks", async () => {
+    mockStreamFetch({ pieces: helloStream });
+
+    const chunks = await collect(
+      chatComplete({ provider: "openai", apiKey: mockApiKey, request: streamRequest }),
+    );
+
+    expect(chunks.map((c) => c.choices[0]?.delta.content)).toEqual(["", "Hello", null]);
+  });
+
+  it("reports an unknown provider as an error chunk", async () => {
+    const fetch = mockStreamFetch();
+
+    const chunks = await collect(
+      chatComplete({ provider: "nope", apiKey: mockApiKey, request: streamRequest }),
+    );
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).toMatchObject({ model: "gpt-4", provider: null, choices: [] });
+    expect(chunks[0]?.error?.message).toContain("nope");
+  });
+
+  it("reports an invalid request as an error chunk", async () => {
+    const fetch = mockStreamFetch();
+    const request = { ...streamRequest, messages: [{ role: "robot", content: "Hi" }] } as never;
+
+    const chunks = await collect(chatComplete({ provider: "openai", apiKey: mockApiKey, request }));
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.error).not.toBeNull();
+  });
+
+  it("reports a provider error as an error chunk", async () => {
+    mockStreamFetch({ status: 401 });
+
+    const chunks = await collect(
+      chatComplete({ provider: "openai", apiKey: mockApiKey, request: streamRequest }),
+    );
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.error).toMatchObject({ code: 401, retries_attempted: 0 });
+  });
+
+  it("still throws for an invalid request without stream", async () => {
+    await expect(
+      chatComplete({
+        provider: "nope",
+        apiKey: mockApiKey,
+        request: { ...streamRequest, stream: false },
+      }),
+    ).rejects.toThrow();
   });
 });

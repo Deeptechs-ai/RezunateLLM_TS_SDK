@@ -9,8 +9,11 @@ describe("package entry point", () => {
       [
         "AnthropicProvider",
         "BaseProvider",
+        "ChatCompletionChunkSchema",
         "ChatCompletionRequestSchema",
         "ChatCompletionResponseSchema",
+        "ChoiceChunkSchema",
+        "ChoiceDeltaSchema",
         "DeepSeekProvider",
         "GoogleProvider",
         "GrokProvider",
