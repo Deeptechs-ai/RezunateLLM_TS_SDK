@@ -2,7 +2,7 @@
 
 Unified TypeScript SDK for chat completions across multiple AI providers, using the OpenAI request/response format. It is the TypeScript version of the Python SDK [`rezunate-llm-sdk`](https://pypi.org/project/rezunate-llm-sdk/).
 
->**Work in progress.** Normal (non-streaming) chat works with all providers. Other features of the Python SDK are being ported; see [Status](#status). The package is not published to npm yet.
+>**Work in progress.** Chat, normal and streaming, works with all providers. Other features of the Python SDK are being ported; see [Status](#status). The package is not published to npm yet.
 
 ## Status
 
@@ -12,7 +12,7 @@ Unified TypeScript SDK for chat completions across multiple AI providers, using 
 | Provider factory and registry (same design as the Python SDK) | ✅ Done |
 | Automatic retries (one rule for all providers), timeouts, errors returned as a response | ✅ Done |
 | Organization-level API keys (`organization`, `project`, `workspaceId`) | ✅ Done |
-| Streaming | ⏳ Planned |
+| Streaming, with the same retries and error rule for all providers | ✅ Done |
 | Tool calls | ⏳ Planned |
 | Prompts (fetch and render saved prompts) | ⏳ Planned |
 | Guardrails (local rules and server-side PII masking) | ⏳ Planned |
@@ -87,6 +87,8 @@ try {
 }
 ```
 
+Streaming works differently: nothing throws, every problem comes as an error chunk (see [Streaming](#streaming)).
+
 ### Retries
 
 Every provider uses the same retry rule. A failed call is retried on **429, 500, 502, 503, 504**, timeouts and connection errors, waiting 1s, 2s, then 4s (plus a small random delay). Other errors, such as 400 or 401, are not retried. After the last attempt, `error.retries_attempted` says how many retries were made.
@@ -103,6 +105,43 @@ const provider = getProvider("openai", process.env.OPENAI_API_KEY!, {
 });
 const response = await provider.chatComplete({ model: "gpt-4o-mini", messages });
 ```
+
+### Streaming
+
+Set `stream: true` to get the answer in small pieces (chunks) as it is written. `chatComplete` then returns the chunks to loop over with `for await` (no `await` before `chatComplete`):
+
+```ts
+const stream = chatComplete({
+  provider: "anthropic",
+  apiKey: process.env.ANTHROPIC_API_KEY!,
+  request: { model: "claude-haiku-4-5", messages, stream: true },
+});
+
+for await (const chunk of stream) {
+  if (chunk.error) {
+    console.error(chunk.error.code, chunk.error.message);
+    break;
+  }
+  process.stdout.write(chunk.choices[0]?.delta.content ?? "");
+  if (chunk.choices[0]?.finish_reason) {
+    console.log("\n", chunk.choices[0].finish_reason, chunk.usage);
+  }
+}
+```
+
+Every provider sends chunks in the OpenAI format (`object: "chat.completion.chunk"`):
+
+- The first chunk usually has `delta.role: "assistant"`; the next ones have the new text in `delta.content`.
+- The last chunk has `finish_reason` and `provider_finish_reason`, the same as in a normal response.
+- `usage` is filled when the provider sends it, usually in the last chunk. OpenAI-format providers send it only when you ask with `stream_options: { include_usage: true }` in the request.
+
+How problems are reported:
+
+- **Everything comes as a chunk.** With `stream: true` nothing throws, not even for an invalid request or an unknown provider: you get one chunk with `error` set (`message`, `code`, `retries_attempted`) and empty `choices`, and the stream ends.
+- **Only the start is retried.** If the stream cannot be opened (429, 5xx, timeout, connection error), it is retried with the [same rule](#retries) as normal chat. Once text has arrived it is never retried, because that would repeat the text; the stream ends with an error chunk instead, after the chunks already sent.
+- **The timeout counts silence, not total time.** A stream fails only when no data arrives for `timeout` seconds, so long answers are not cut off.
+
+To stop early, `break` out of the loop; the connection is closed.
 
 ## Providers
 
@@ -190,7 +229,8 @@ src/
     ├── gateway.ts           # chatComplete()
     ├── models.ts            # request/response models (zod)
     ├── constants.ts
-    └── providers/           # one file per provider, plus base, factory and endpoints
+    ├── providers/           # one file per provider, plus base, factory and endpoints
+    └── streaming/           # SSE parser used by the streaming providers
 tests/                       # one *.test.ts per area; fixtures.ts holds shared test data
 ```
 
@@ -202,11 +242,13 @@ The TypeScript SDK is meant to behave like the Python SDK. These differences are
 
 1. **One retry rule for every provider.** All seven providers retry through the SDK's own loop (429/500/502/503/504, timeouts and connection errors; 1s → 2s → 4s; `maxRetries` and `retryDelay` always apply). In Python, OpenAI, Grok and DeepSeek are retried by the `openai` library with its own rules (it also retries 408 and 409, and ignores `retry_delay`), and the others by the SDK's loop.
 2. **`retries_attempted` is filled in, for every provider.** When a request finally fails, `error.retries_attempted` shows how many retries were made (for example `3` after 4 failed attempts, `0` when the error was not retried). In Python it is always empty.
-3. **Finish reasons never break a reply.** Anthropic, Gemini and the OpenAI-format providers keep adding new stop/finish reasons (for example Anthropic's `refusal`, `pause_turn` and `model_context_window_exceeded`, or Gemini's `TOO_MANY_TOOL_CALLS`). The TS SDK translates every value the providers document today, and any value it doesn't know yet becomes `"stop"`, instead of failing. The provider's original value is always kept in `choices[].provider_finish_reason`. The Python SDK only accepts a fixed list, so a reply with a newer value (even ones its own mapping handles, such as Gemini's `BLOCKLIST` or `PROHIBITED_CONTENT`) is rejected and returned as an error.
+3. **Finish reasons never break a reply.** Anthropic, Gemini and the OpenAI-format providers keep adding new stop/finish reasons (for example Anthropic's `refusal`, `pause_turn` and `model_context_window_exceeded`, or Gemini's `TOO_MANY_TOOL_CALLS`). The TS SDK translates every value the providers document today, and any value it doesn't know yet becomes `"stop"`, instead of failing. The provider's original value is always kept in `choices[].provider_finish_reason`. Gemini's image-only reasons (`IMAGE_SAFETY`, `IMAGE_PROHIBITED_CONTENT`, `IMAGE_RECITATION`, `IMAGE_OTHER`, `NO_IMAGE`) are not translated, because the SDK is text-only, so they also become `"stop"`. The same applies to streams. The Python SDK only accepts a fixed list, so a reply with a newer value (even ones its own mapping handles, such as Gemini's `BLOCKLIST` or `PROHIBITED_CONTENT`) is rejected and returned as an error.
 4. **`meta` replaces `llama`.** Meta retired the Llama API (`api.llama.com`). The `meta` provider uses Meta's new OpenAI-compatible Meta Model API (`https://api.meta.ai/v1`) with the Muse Spark models. The Python SDK still has the `llama` provider for the retired API.
 5. **Organization-level API keys are supported** (`organization`, `project`, `workspaceId`; see above). The Python SDK has none of these, so, for example, an organization-level Anthropic key fails there with "not scoped to a workspace".
-6. **Blocked Gemini prompts are reported.** When Gemini blocks the question itself (it returns no answer, only `promptFeedback.blockReason`), the TS SDK returns one choice with no content, `finish_reason: "content_filter"` and the reason in `provider_finish_reason` (e.g. `"SAFETY"`), the same way a blocked answer is reported. The Python SDK drops the reason and returns no choices and no error.
+6. **Blocked Gemini prompts are reported.** When Gemini blocks the question itself (it returns no answer, only `promptFeedback.blockReason`), the TS SDK returns one choice with no content, `finish_reason: "content_filter"` and the reason in `provider_finish_reason` (e.g. `"SAFETY"`), the same way a blocked answer is reported. In a stream, the same comes as one chunk. The Python SDK drops the reason and returns no choices and no error (in a stream: no chunks at all).
 7. **TypeScript naming and style.** Functions and options use camelCase (`chatComplete`, `apiKey`), and the inputs are passed as one object (`chatComplete({ provider, apiKey, request })`). JSON fields sent to and received from providers keep their original names (`max_tokens`, `finish_reason`, and so on).
+8. **The start of a stream is retried, for every provider.** In Python, Anthropic, Google and Qwen streams are never retried, and OpenAI-format streams are retried by the `openai` library with its own rules.
+9. **Stream problems never throw.** With `stream: true`, every problem, including an invalid request or an unknown provider, comes as an error chunk. In Python, an invalid streaming request throws, and only provider and network failures come as error chunks.
 
 ## Known limitations
 
@@ -214,7 +256,6 @@ These behave the same as in the Python SDK and will be improved in later feature
 
 - **Several system messages (Anthropic, Google):** these providers take a single system prompt, so when a request has more than one `system` message, only the last one is sent.
 - **Tool calls are not supported yet:** `tools` and `tool_choice` are not translated for Anthropic and Google, `tool_calls` in replies are dropped, and `tool` messages are sent as `user` messages (Qwen rejects them). Full tool-call support is planned.
-- **Streaming:** `stream: true` throws "Streaming is not supported yet".
 
 ## License
 
