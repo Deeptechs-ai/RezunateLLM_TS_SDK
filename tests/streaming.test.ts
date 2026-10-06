@@ -901,3 +901,152 @@ describe("google streaming", () => {
     },
   );
 });
+
+/** One DashScope stream frame, in the exact text format DashScope sends. */
+function qwenFrame(
+  id: number,
+  text: string,
+  finishReason = "null",
+  usage: [number, number] | null = [7, id],
+): string {
+  const data = {
+    output: {
+      choices: [{ message: { role: "assistant", content: text }, finish_reason: finishReason }],
+    },
+    ...(usage
+      ? {
+          usage: {
+            input_tokens: usage[0],
+            output_tokens: usage[1],
+            total_tokens: usage[0] + usage[1],
+          },
+        }
+      : {}),
+    request_id: "req-1",
+  };
+  return `id:${id}\nevent:result\n:HTTP_STATUS/200\ndata:${JSON.stringify(data)}\n\n`;
+}
+
+const qwenStream = [qwenFrame(1, "Hel"), qwenFrame(2, "lo"), qwenFrame(3, "", "stop")];
+
+describe("qwen streaming", () => {
+  it("turns DashScope frames into chunks", async () => {
+    mockStreamFetch({ pieces: qwenStream });
+
+    const chunks = await collect(streamingProvider("qwen").stream(hiRequest("qwen-plus")));
+
+    expect(chunks.map((c) => c.choices[0]?.delta)).toEqual([
+      { role: "assistant", content: "Hel" },
+      { role: null, content: "lo" },
+      { role: null, content: null },
+    ]);
+    expect(chunks[2]?.choices[0]?.finish_reason).toBe("stop");
+    expect(chunks[2]?.choices[0]?.provider_finish_reason).toBe("stop");
+    expect(chunks[2]?.usage).toEqual({ prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 });
+    expect(chunks.every((c) => c.id === "req-1" && c.provider === "qwen")).toBe(true);
+    expect(chunks[0]?.model).toBe("qwen-plus");
+  });
+
+  it('ignores the "null" finish reason DashScope sends while streaming', async () => {
+    mockStreamFetch({ pieces: qwenStream });
+
+    const chunks = await collect(streamingProvider("qwen").stream(hiRequest("qwen-plus")));
+
+    expect(chunks[0]?.choices[0]?.finish_reason).toBeNull();
+    expect(chunks[0]?.choices[0]?.provider_finish_reason).toBeNull();
+  });
+
+  it("POSTs with incremental output and the SSE header", async () => {
+    const fetch = mockStreamFetch({ pieces: qwenStream });
+
+    await collect(streamingProvider("qwen").stream(hiRequest("qwen-plus")));
+
+    const [url, init] = fetch.mock.calls[0] ?? [];
+    expect(url).toBe(
+      "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
+    );
+    expect(init?.headers).toMatchObject({
+      Authorization: `Bearer ${mockApiKey}`,
+      "X-DashScope-SSE": "enable",
+    });
+    expect(JSON.parse(String(init?.body))).toEqual({
+      model: "qwen-plus",
+      input: { messages: [{ role: "user", content: "Hi" }] },
+      parameters: { result_format: "message", incremental_output: true },
+    });
+  });
+
+  it("uses the workspace URL when a workspace is set", async () => {
+    const fetch = mockStreamFetch({ pieces: qwenStream });
+    const provider = getProvider("qwen", mockApiKey, { workspaceId: "ws-1" });
+
+    await collect(provider.stream(hiRequest("qwen-plus")));
+
+    expect(String(fetch.mock.calls[0]?.[0])).toBe(
+      "https://ws-1.ap-southeast-1.maas.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
+    );
+  });
+
+  it("reads the legacy output.text format", async () => {
+    const data = { output: { text: "Hi", finish_reason: "stop" }, request_id: "req-2" };
+    mockStreamFetch({ pieces: [`data:${JSON.stringify(data)}\n\n`] });
+
+    const [chunk] = await collect(streamingProvider("qwen").stream(hiRequest("qwen-plus")));
+
+    expect(chunk?.choices[0]?.delta).toEqual({ role: "assistant", content: "Hi" });
+    expect(chunk?.choices[0]?.finish_reason).toBe("stop");
+    expect(chunk?.id).toBe("req-2");
+  });
+
+  it("skips frames with no text, finish reason or usage", async () => {
+    mockStreamFetch({ pieces: [qwenFrame(1, "Hi"), qwenFrame(2, "", "null", null)] });
+
+    const chunks = await collect(streamingProvider("qwen").stream(hiRequest("qwen-plus")));
+
+    expect(chunks).toHaveLength(1);
+  });
+
+  // Kept from Python: the role is marked as sent before the empty-frame check.
+  it("drops the role when the first frame is empty, as Python does", async () => {
+    mockStreamFetch({ pieces: [qwenFrame(1, "", "null", null), qwenFrame(2, "Hi")] });
+
+    const chunks = await collect(streamingProvider("qwen").stream(hiRequest("qwen-plus")));
+
+    expect(chunks.map((c) => c.choices[0]?.delta)).toEqual([{ role: null, content: "Hi" }]);
+  });
+
+  it("maps an unknown finish reason to stop and keeps the original", async () => {
+    mockStreamFetch({ pieces: [qwenFrame(1, "", "something_new")] });
+
+    const [chunk] = await collect(streamingProvider("qwen").stream(hiRequest("qwen-plus")));
+
+    expect(chunk?.choices[0]?.finish_reason).toBe("stop");
+    expect(chunk?.choices[0]?.provider_finish_reason).toBe("something_new");
+  });
+
+  it("retries the start of the stream", async () => {
+    const fetch = mockStreamFetch({ status: 502 }, { pieces: qwenStream });
+
+    const chunks = await collect(streamingProvider("qwen").stream(hiRequest("qwen-plus")));
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(chunks).toHaveLength(3);
+  });
+
+  it("reports an unsafe workspaceId as an error chunk through chatComplete", async () => {
+    const fetch = mockStreamFetch();
+
+    const chunks = await collect(
+      chatComplete({
+        provider: "qwen",
+        apiKey: mockApiKey,
+        workspaceId: "evil.com/x",
+        request: { model: "qwen-plus", messages: [{ role: "user", content: "Hi" }], stream: true },
+      }),
+    );
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.error?.message).toContain("Invalid Qwen workspaceId");
+  });
+});

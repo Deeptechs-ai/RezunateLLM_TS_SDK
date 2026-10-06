@@ -84,3 +84,9 @@ export const QwenResponseSchema = z.looseObject({
   request_id: z.string().nullable().default(null),
 });
 export type QwenResponse = z.infer<typeof QwenResponseSchema>;
+
+/** One streamed DashScope frame: a response whose `usage` may be missing. */
+export const QwenStreamChunkSchema = QwenResponseSchema.extend({
+  usage: QwenUsageSchema.nullable().default(null),
+});
+export type QwenStreamChunk = z.infer<typeof QwenStreamChunkSchema>;

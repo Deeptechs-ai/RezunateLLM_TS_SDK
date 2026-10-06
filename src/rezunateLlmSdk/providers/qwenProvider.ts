@@ -6,19 +6,34 @@
 import { randomUUID } from "node:crypto";
 import * as constants from "../constants";
 import {
+  type ChatCompletionChunk,
   type ChatCompletionRequest,
   type ChatCompletionResponse,
   type Choice,
+  type ChoiceDelta,
   mapFinishReason,
   Provider,
   Role,
 } from "../models";
-import { BaseProvider, type ProviderOptions } from "./base";
-import { QWEN_BASE_URL, QWEN_GENERATION_ENDPOINT, QWEN_WORKSPACE_BASE_URL } from "./endpoints";
-import { type QwenRequest, QwenRequestSchema, QwenResponseSchema } from "./qwenModels";
+import { BaseProvider, type ProviderOptions, type StreamRequest, type StreamState } from "./base";
+import {
+  getUrl,
+  QWEN_BASE_URL,
+  QWEN_GENERATION_ENDPOINT,
+  QWEN_WORKSPACE_BASE_URL,
+} from "./endpoints";
+import {
+  type QwenRequest,
+  QwenRequestSchema,
+  QwenResponseSchema,
+  QwenStreamChunkSchema,
+} from "./qwenModels";
 
 /** A workspace ID becomes part of a hostname, so only letters, numbers and "-" are allowed. */
 const WORKSPACE_ID_PATTERN = /^[A-Za-z0-9-]+$/;
+
+/** DashScope only streams when this header is set to "enable". */
+const DASHSCOPE_SSE_HEADER = "X-DashScope-SSE";
 
 /** Qwen provider against Alibaba DashScope's native generation API. */
 export class QwenProvider extends BaseProvider {
@@ -126,5 +141,75 @@ export class QwenProvider extends BaseProvider {
       provider: this.providerName,
       error: null,
     };
+  }
+
+  // ---- streaming hooks (driven by BaseProvider.stream) ----
+
+  protected override buildStreamRequest(request: ChatCompletionRequest): StreamRequest {
+    const qwenRequest = this.transformRequest(request);
+    // Ensure incremental_output is enabled so each frame is a delta.
+    const body = {
+      ...qwenRequest,
+      parameters: { ...qwenRequest.parameters, incremental_output: true },
+    };
+    const headers = { ...this.getHeaders(), [DASHSCOPE_SSE_HEADER]: "enable" };
+    return { url: getUrl(this.baseUrl, this.getEndpoint()), body, headers };
+  }
+
+  protected override translateFrame(
+    _event: string,
+    data: string,
+    state: StreamState,
+  ): ChatCompletionChunk | null {
+    const payload = BaseProvider.parseJsonFrame(data);
+    if (payload === null) {
+      return null;
+    }
+    const frame = QwenStreamChunkSchema.parse(payload);
+
+    const output = frame.output;
+    let text = "";
+    let finishReasonRaw: string | null = null;
+    const first = output.choices[0];
+    if (first) {
+      text = first.message.content || "";
+      finishReasonRaw = first.finish_reason;
+    } else if (output.text !== null) {
+      text = output.text || "";
+      finishReasonRaw = output.finish_reason;
+    }
+
+    // DashScope sends "null"/"" finish_reason while streaming; only the final frame has a value.
+    const finishReason = finishReasonRaw && finishReasonRaw !== "null" ? finishReasonRaw : null;
+
+    const usagePayload = frame.usage;
+    const usage = usagePayload && {
+      prompt_tokens: usagePayload.input_tokens,
+      completion_tokens: usagePayload.output_tokens,
+      total_tokens:
+        usagePayload.total_tokens || usagePayload.input_tokens + usagePayload.output_tokens,
+    };
+
+    const delta: Partial<ChoiceDelta> = {};
+    if (!state.roleSent) {
+      delta.role = Role.ASSISTANT;
+      state.roleSent = true;
+    }
+    if (text) {
+      delta.content = text;
+    }
+
+    // Skip frames that carry neither content nor a terminal signal. (As in Python, roleSent is
+    // already true here, so an empty first frame is skipped too and its role is not sent.)
+    if (!text && finishReason === null && usage === null && state.roleSent) {
+      return null;
+    }
+
+    // Prefer the per-frame request_id over the state's uuid placeholder.
+    if (frame.request_id) {
+      state.id = frame.request_id;
+    }
+
+    return this.makeChunk(state, { delta, finishReason, usage });
   }
 }
