@@ -293,6 +293,24 @@ describe("Gemini tool calls", () => {
     ]);
   });
 
+  // New in the TS port: Python sends the tool_call_id as the function name.
+  it("finds the function name for a tool message that has none", () => {
+    const request = ChatCompletionRequestSchema.parse({
+      model: "gemini-2.5-flash",
+      messages: [
+        { role: "user", content: "Weather?" },
+        { role: "assistant", tool_calls: [weatherCall] },
+        { role: "tool", content: '{"temp":18}', tool_call_id: "call_1" },
+        { role: "tool", content: "late", tool_call_id: "call_unknown" },
+      ],
+    });
+
+    const out = google().transformRequest(request);
+
+    expect(out.contents[2]?.parts[0]?.functionResponse?.name).toBe("get_weather");
+    expect(out.contents[3]?.parts[0]?.functionResponse?.name).toBe("call_unknown");
+  });
+
   it("returns functionCall parts as tool calls", () => {
     const result = google().transformResponse(
       {

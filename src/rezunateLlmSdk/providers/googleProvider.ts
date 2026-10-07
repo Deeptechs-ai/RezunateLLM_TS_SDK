@@ -71,6 +71,14 @@ export class GoogleProvider extends BaseProvider {
     let systemContent: string | null = null;
     const googleMessages: GoogleMessage[] = [];
 
+    // Gemini matches a tool result by function name, so remember each tool call's name by id.
+    const toolNamesById = new Map<string, string>();
+    for (const msg of request.messages) {
+      for (const call of msg.tool_calls ?? []) {
+        toolNamesById.set(call.id, call.function.name);
+      }
+    }
+
     for (const msg of request.messages) {
       if (msg.role === Role.SYSTEM) {
         if (msg.content) {
@@ -98,8 +106,12 @@ export class GoogleProvider extends BaseProvider {
           parts: [
             {
               functionResponse: {
-                // Same as Python: the tool_call_id is used when the message has no name.
-                name: msg.name || msg.tool_call_id || "tool",
+                // Without a name, use the name of the tool call it answers (Python uses the id).
+                name:
+                  msg.name ||
+                  (msg.tool_call_id && toolNamesById.get(msg.tool_call_id)) ||
+                  msg.tool_call_id ||
+                  "tool",
                 response: responsePayload as Record<string, unknown>,
               },
             },
