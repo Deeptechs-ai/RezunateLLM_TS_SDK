@@ -156,7 +156,7 @@ describe("OpenAI-compatible finish reasons", () => {
     ["grok", "grok-3-mini", grokResponse(), UNKNOWN, "stop"],
     ["deepseek", "deepseek-chat", deepseekResponse(), "aborted", "stop"],
     ["deepseek", "deepseek-chat", deepseekResponse(), "insufficient_system_resource", "stop"],
-    ["meta", "muse-spark-1.3", metaResponse(), "function_call", "stop"],
+    ["meta", "muse-spark-1.3", metaResponse(), "function_call", "tool_calls"],
     ["openai", "gpt-4", openaiResponse(), "content_filter", "content_filter"],
   ])("%s: %s → %s, original kept", async (provider, model, response, reason, expected) => {
     mockFetch({ json: withReason(response, reason) });

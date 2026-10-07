@@ -14,6 +14,7 @@ import {
   mapFinishReason,
   Provider,
   Role,
+  type ToolCall,
 } from "../models";
 import { BaseProvider, type ProviderOptions, type StreamRequest, type StreamState } from "./base";
 import {
@@ -73,13 +74,21 @@ export class QwenProvider extends BaseProvider {
 
   /**
    * Transform an OpenAI format request to DashScope native format.
-   * Messages move under `input.messages`, and settings under `parameters`.
+   * Messages move under `input.messages`, and settings (including tools) under `parameters`.
+   * DashScope uses OpenAI's tool shapes, so tools and tool calls are passed as they are.
    */
   transformRequest(request: ChatCompletionRequest): QwenRequest {
     return QwenRequestSchema.parse({
       model: request.model,
       input: {
-        messages: request.messages.map((msg) => ({ role: msg.role, content: msg.content })),
+        messages: request.messages.map((msg) => ({
+          role: msg.role,
+          // A tool call or tool result may have no text; DashScope needs a string.
+          content:
+            msg.tool_calls?.length || msg.role === Role.TOOL ? (msg.content ?? "") : msg.content,
+          tool_calls: msg.tool_calls,
+          tool_call_id: msg.tool_call_id,
+        })),
       },
       parameters: {
         result_format: "message",
@@ -91,6 +100,9 @@ export class QwenProvider extends BaseProvider {
         seed: request.seed,
         enable_search: request.enable_search,
         repetition_penalty: request.repetition_penalty,
+        tools: request.tools,
+        tool_choice: request.tool_choice,
+        parallel_tool_calls: request.parallel_tool_calls,
       },
     });
   }
@@ -107,7 +119,21 @@ export class QwenProvider extends BaseProvider {
     if (output.choices.length > 0) {
       choices = output.choices.map((choice, idx) => ({
         index: idx,
-        message: { role: Role.ASSISTANT, content: choice.message.content },
+        message: {
+          role: Role.ASSISTANT,
+          content: choice.message.content,
+          ...(choice.message.tool_calls?.length
+            ? {
+                tool_calls: choice.message.tool_calls.map(
+                  (call): ToolCall => ({
+                    id: call.id,
+                    type: "function",
+                    function: { name: call.function.name, arguments: call.function.arguments },
+                  }),
+                ),
+              }
+            : {}),
+        },
         finish_reason: mapFinishReason(choice.finish_reason),
         provider_finish_reason: choice.finish_reason,
       }));

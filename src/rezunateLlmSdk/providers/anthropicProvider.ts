@@ -9,16 +9,22 @@ import {
   type ChatCompletionChunk,
   type ChatCompletionRequest,
   type ChatCompletionResponse,
+  type Message,
   mapFinishReason,
   Provider,
   Role,
+  type Tool,
+  type ToolCall,
 } from "../models";
 import {
+  type AnthropicContentBlock,
   type AnthropicMessage,
   type AnthropicRequest,
   AnthropicRequestSchema,
   AnthropicResponseSchema,
   AnthropicStreamEventSchema,
+  type AnthropicTool,
+  type AnthropicToolChoice,
 } from "./anthropicModels";
 import { BaseProvider, type StreamRequest, type StreamState } from "./base";
 import {
@@ -57,6 +63,7 @@ export class AnthropicProvider extends BaseProvider {
   /**
    * Transform an OpenAI format request to Anthropic format.
    * The system message moves to a separate `system` field, and `max_tokens` defaults to 1024.
+   * Tool calls become `tool_use` blocks, and `tool` messages become `tool_result` blocks.
    */
   transformRequest(request: ChatCompletionRequest): AnthropicRequest {
     let systemContent: string | null = null;
@@ -70,8 +77,23 @@ export class AnthropicProvider extends BaseProvider {
         continue;
       }
 
+      if (msg.role === Role.TOOL) {
+        anthropicMessages.push({
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: msg.tool_call_id ?? "",
+              content: msg.content ?? "",
+            },
+          ],
+        });
+        continue;
+      }
+
       const anthropicRole = msg.role === Role.ASSISTANT ? "assistant" : "user";
-      anthropicMessages.push({ role: anthropicRole, content: msg.content ?? "" });
+      const blocks = messageToAnthropicBlocks(msg);
+      anthropicMessages.push({ role: anthropicRole, content: blocks ?? msg.content ?? "" });
     }
 
     return AnthropicRequestSchema.parse({
@@ -82,20 +104,29 @@ export class AnthropicProvider extends BaseProvider {
       temperature: request.temperature,
       top_k: request.top_k,
       metadata: request.metadata,
+      tools: translateTools(request.tools),
+      tool_choice: translateToolChoice(request.tool_choice),
     });
   }
 
   /**
    * Transform an Anthropic format response to OpenAI format.
-   * Text blocks are joined into `message.content`.
+   * Text blocks are joined into `message.content`, and `tool_use` blocks become `tool_calls`.
    */
   transformResponse(response: unknown, model?: string | null): ChatCompletionResponse {
     const anthropicResponse = AnthropicResponseSchema.parse(response);
 
     const textParts: string[] = [];
+    const toolCalls: ToolCall[] = [];
     for (const block of anthropicResponse.content) {
       if (block.type === "text") {
         textParts.push(block.text);
+      } else if (block.type === "tool_use") {
+        toolCalls.push({
+          id: block.id,
+          type: "function",
+          function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) },
+        });
       }
     }
 
@@ -113,7 +144,11 @@ export class AnthropicProvider extends BaseProvider {
       choices: [
         {
           index: 0,
-          message: { role: Role.ASSISTANT, content },
+          message: {
+            role: Role.ASSISTANT,
+            content,
+            ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+          },
           finish_reason: mapFinishReason(stopReason),
           provider_finish_reason: stopReason,
         },
@@ -188,4 +223,69 @@ export class AnthropicProvider extends BaseProvider {
 
     return null;
   }
+}
+
+/**
+ * Build Anthropic content blocks from an assistant message with tool calls.
+ * Returns `null` when there are no tool calls (the caller then sends plain text).
+ */
+function messageToAnthropicBlocks(msg: Message): AnthropicContentBlock[] | null {
+  if (!msg.tool_calls || msg.tool_calls.length === 0) {
+    return null;
+  }
+
+  const blocks: AnthropicContentBlock[] = [];
+  if (msg.content) {
+    blocks.push({ type: "text", text: msg.content });
+  }
+  for (const call of msg.tool_calls) {
+    let input: unknown;
+    try {
+      input = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+    } catch {
+      input = { _raw: call.function.arguments };
+    }
+    blocks.push({
+      type: "tool_use",
+      id: call.id,
+      name: call.function.name,
+      input: input as Record<string, unknown>,
+    });
+  }
+  return blocks;
+}
+
+/** Translate OpenAI-shaped tools into Anthropic's tool schema. */
+function translateTools(tools: Tool[] | null | undefined): AnthropicTool[] | null {
+  if (!tools || tools.length === 0) {
+    return null;
+  }
+  return tools.map((tool) => ({
+    name: tool.function.name,
+    description: tool.function.description || "",
+    input_schema:
+      Object.keys(tool.function.parameters).length > 0
+        ? tool.function.parameters
+        : { type: "object", properties: {} },
+  }));
+}
+
+/** Translate OpenAI-shaped `tool_choice` into Anthropic's format. */
+function translateToolChoice(
+  toolChoice: ChatCompletionRequest["tool_choice"],
+): AnthropicToolChoice | null {
+  if (toolChoice == null) {
+    return null;
+  }
+  // Sent explicitly (Python leaves it out, so Anthropic's default "auto" would apply).
+  if (toolChoice === "none") {
+    return { type: "none" };
+  }
+  if (toolChoice === "auto") {
+    return { type: "auto" };
+  }
+  if (toolChoice === "required") {
+    return { type: "any" };
+  }
+  return { type: "tool", name: toolChoice.function.name };
 }

@@ -51,6 +51,8 @@ export const FINISH_REASON_MAP: Readonly<Record<string, FinishReason>> = {
   length: FinishReason.LENGTH,
   content_filter: FinishReason.CONTENT_FILTER,
   tool_calls: FinishReason.TOOL_CALLS,
+  // OpenAI's old name for tool_calls; OpenAI-compatible APIs (e.g. Meta) may still send it
+  function_call: FinishReason.TOOL_CALLS,
   // DeepSeek-specific — returned by deepseek-reasoner under resource pressure
   insufficient_system_resource: FinishReason.STOP,
   aborted: FinishReason.STOP,
@@ -90,6 +92,53 @@ export function mapFinishReason(reason: string | null | undefined): FinishReason
     : FinishReason.STOP;
 }
 
+// ---- Tools ----------------------------------------------------------------------------
+
+/** OpenAI-shaped function-call payload inside a tool call. */
+export const FunctionCallSchema = z.object({
+  name: z.string(),
+  /** The arguments as a JSON string, e.g. `{"city":"Paris"}`. */
+  arguments: z.string().default(""),
+});
+export type FunctionCall = z.infer<typeof FunctionCallSchema>;
+
+/** A tool/function call requested by the assistant (OpenAI's `message.tool_calls[*]`). */
+export const ToolCallSchema = z.object({
+  id: z.string(),
+  type: z.literal("function").default("function"),
+  function: FunctionCallSchema,
+});
+export type ToolCall = z.infer<typeof ToolCallSchema>;
+
+/** OpenAI-shaped tool function definition (sent on the request side). */
+export const FunctionDefinitionSchema = z.object({
+  name: z.string(),
+  description: z.string().nullish(),
+  /** Caller-supplied JSON Schema for the function's arguments. */
+  parameters: z.record(z.string(), z.unknown()).default(() => ({})),
+});
+export type FunctionDefinition = z.infer<typeof FunctionDefinitionSchema>;
+
+/** OpenAI-shaped tool entry passed in `ChatCompletionRequest.tools`. */
+export const ToolSchema = z.object({
+  type: z.literal("function").default("function"),
+  function: FunctionDefinitionSchema,
+});
+export type Tool = z.infer<typeof ToolSchema>;
+
+/** Inner `function` block of a `tool_choice` selecting a specific tool. */
+export const ToolChoiceFunctionSchema = z.object({
+  name: z.string(),
+});
+export type ToolChoiceFunction = z.infer<typeof ToolChoiceFunctionSchema>;
+
+/** Structured `tool_choice` payload selecting a specific function. */
+export const ToolChoiceOptionSchema = z.object({
+  type: z.literal("function").default("function"),
+  function: ToolChoiceFunctionSchema,
+});
+export type ToolChoiceOption = z.infer<typeof ToolChoiceOptionSchema>;
+
 // ---- Request --------------------------------------------------------------------------
 
 /** A chat message. Unknown extra fields are kept, as with pydantic's `extra="allow"`. */
@@ -98,6 +147,7 @@ export const MessageSchema = z.looseObject({
   content: z.string().nullish(),
   name: z.string().nullish(),
   tool_call_id: z.string().nullish(),
+  tool_calls: z.array(ToolCallSchema).nullish(),
 });
 export type Message = z.infer<typeof MessageSchema>;
 
@@ -114,6 +164,8 @@ export const ChatCompletionRequestSchema = z.looseObject({
   n: z.number().int().nullish(),
   stream: z.boolean().nullish(),
   user: z.string().nullish(),
+  tools: z.array(ToolSchema).nullish(),
+  tool_choice: z.union([z.enum(["auto", "required", "none"]), ToolChoiceOptionSchema]).nullish(),
 });
 export type ChatCompletionRequest = z.infer<typeof ChatCompletionRequestSchema>;
 
@@ -131,6 +183,8 @@ export type Usage = z.infer<typeof UsageSchema>;
 export const ResponseMessageSchema = z.object({
   role: RoleSchema.default(Role.ASSISTANT),
   content: z.string().nullable().default(null),
+  /** Present only when the model asks for tool calls. */
+  tool_calls: z.array(ToolCallSchema).nullish(),
 });
 export type ResponseMessage = z.infer<typeof ResponseMessageSchema>;
 
