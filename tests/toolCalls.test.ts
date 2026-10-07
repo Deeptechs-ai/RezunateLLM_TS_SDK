@@ -5,7 +5,8 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { chatComplete } from "../src/rezunateLlmSdk/gateway";
-import { MessageSchema, Role } from "../src/rezunateLlmSdk/models";
+import { ChatCompletionRequestSchema, MessageSchema, Role } from "../src/rezunateLlmSdk/models";
+import { AnthropicProvider } from "../src/rezunateLlmSdk/providers/anthropicProvider";
 import { dropNones } from "../src/rezunateLlmSdk/providers/base";
 import { mockApiKey, mockFetch, openaiResponse } from "./fixtures";
 
@@ -113,5 +114,106 @@ describe("OpenAI-compatible tool calls", () => {
       tool_calls: [weatherCall],
     });
     expect(result.choices[0]?.finish_reason).toBe("tool_calls");
+  });
+});
+
+describe("Anthropic tool calls", () => {
+  const anthropic = () => new AnthropicProvider({ apiKey: mockApiKey });
+
+  it("translates OpenAI tools and tool_choice", () => {
+    const request = ChatCompletionRequestSchema.parse({
+      model: "claude-sonnet-4-5",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [weatherTool],
+      tool_choice: "required",
+    });
+
+    const out = anthropic().transformRequest(request);
+
+    expect(out.tools).toEqual([
+      {
+        name: "get_weather",
+        description: "Get the weather for a city",
+        input_schema: { type: "object", properties: { city: { type: "string" } } },
+      },
+    ]);
+    expect(out.tool_choice).toEqual({ type: "any" });
+  });
+
+  it("translates a tool_choice for a specific function", () => {
+    const request = ChatCompletionRequestSchema.parse({
+      model: "claude-sonnet-4-5",
+      messages: [{ role: "user", content: "hi" }],
+      tool_choice: { type: "function", function: { name: "get_weather" } },
+    });
+
+    expect(anthropic().transformRequest(request).tool_choice).toEqual({
+      type: "tool",
+      name: "get_weather",
+    });
+  });
+
+  it("sends assistant tool calls as tool_use blocks and tool messages as tool_result", () => {
+    const request = ChatCompletionRequestSchema.parse({
+      model: "claude-sonnet-4-5",
+      messages: [
+        { role: "user", content: "What's the weather in Tokyo?" },
+        {
+          role: "assistant",
+          content: "I'll check.",
+          tool_calls: [
+            { id: "toolu_1", function: { name: "get_weather", arguments: '{"city":"Tokyo"}' } },
+          ],
+        },
+        { role: "tool", content: "sunny, 22C", tool_call_id: "toolu_1" },
+      ],
+    });
+
+    const out = anthropic().transformRequest(request);
+
+    expect(out.messages).toEqual([
+      { role: "user", content: "What's the weather in Tokyo?" },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "I'll check." },
+          { type: "tool_use", id: "toolu_1", name: "get_weather", input: { city: "Tokyo" } },
+        ],
+      },
+      {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "sunny, 22C" }],
+      },
+    ]);
+  });
+
+  it("returns tool_use blocks as tool calls", () => {
+    const result = anthropic().transformResponse(
+      {
+        id: "msg_1",
+        type: "message",
+        role: "assistant",
+        model: "claude-sonnet-4-5",
+        content: [
+          { type: "text", text: "Let me check." },
+          { type: "tool_use", id: "toolu_xyz", name: "get_weather", input: { city: "Tokyo" } },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 30, output_tokens: 12 },
+      },
+      "claude-sonnet-4-5",
+    );
+
+    expect(result.choices[0]?.finish_reason).toBe("tool_calls");
+    expect(result.choices[0]?.provider_finish_reason).toBe("tool_use");
+    const msg = result.choices[0]?.message;
+    expect(msg?.content).toBe("Let me check.");
+    expect(msg?.tool_calls).toHaveLength(1);
+    expect(msg?.tool_calls?.[0]).toMatchObject({
+      id: "toolu_xyz",
+      type: "function",
+      function: { name: "get_weather" },
+    });
+    expect(JSON.parse(msg?.tool_calls?.[0]?.function.arguments ?? "")).toEqual({ city: "Tokyo" });
   });
 });
