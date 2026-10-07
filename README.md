@@ -310,6 +310,7 @@ The TypeScript SDK is meant to behave like the Python SDK. These differences are
 13. **Gemini tool results find their function name.** Gemini matches a tool result by function name, not by id. When a `tool` message has no `name`, the TS SDK takes the name from the tool call with the same `tool_call_id` earlier in the conversation. The Python SDK sends the `tool_call_id` as the name, which Gemini may not match.
 14. **Anthropic `tool_choice: "none"` is sent.** The TS SDK sends it as `{ "type": "none" }`, so Claude calls no tools. The Python SDK leaves it out, so Anthropic's default (`auto`) applies and the model may still call a tool.
 15. **Gemini gets parallel tool results together.** When the model calls several tools at once, Gemini needs all their results in one message. The TS SDK groups `tool` messages that follow each other into one message; the Python SDK sends one message per result, which Gemini rejects.
+16. **Gemini accepts full JSON Schema for tools.** The TS SDK sends a tool's schema to Gemini as `parametersJsonSchema`, so keywords such as `additionalProperties` (required by OpenAI's strict mode) and `$ref` work. The Python SDK uses Gemini's older `parameters` field, which rejects them with a 400 error.
 
 ## Known limitations
 

@@ -322,7 +322,8 @@ function translateTools(tools: Tool[] | null | undefined): GoogleTool[] | null {
   const declarations = tools.map((tool) => ({
     name: tool.function.name,
     description: tool.function.description || "",
-    parameters:
+    // Python sends `parameters`, which Gemini rejects for keywords like additionalProperties.
+    parametersJsonSchema:
       Object.keys(tool.function.parameters).length > 0
         ? tool.function.parameters
         : { type: "object", properties: {} },

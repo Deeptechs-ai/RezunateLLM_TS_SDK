@@ -234,11 +234,18 @@ describe("Anthropic tool calls", () => {
 describe("Gemini tool calls", () => {
   const google = () => new GoogleProvider({ apiKey: mockApiKey });
 
-  it("translates OpenAI tools into function declarations", () => {
+  // New in the TS port: Python uses Gemini's `parameters`, which rejects these keywords (400).
+  it("sends the full JSON Schema as parametersJsonSchema", () => {
+    const schema = {
+      type: "object",
+      properties: { city: { type: "string" }, unit: { $ref: "#/$defs/unit" } },
+      additionalProperties: false,
+      $defs: { unit: { type: "string", enum: ["celsius", "fahrenheit"] } },
+    };
     const request = ChatCompletionRequestSchema.parse({
       model: "gemini-2.5-flash",
       messages: [{ role: "user", content: "hi" }],
-      tools: [weatherTool],
+      tools: [{ ...weatherTool, function: { ...weatherTool.function, parameters: schema } }],
       tool_choice: "required",
     });
 
@@ -250,7 +257,7 @@ describe("Gemini tool calls", () => {
           {
             name: "get_weather",
             description: "Get the weather for a city",
-            parameters: { type: "object", properties: { city: { type: "string" } } },
+            parametersJsonSchema: schema,
           },
         ],
       },
