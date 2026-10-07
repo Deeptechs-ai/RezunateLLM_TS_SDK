@@ -5,12 +5,35 @@
 
 import { z } from "zod";
 
+// ---- Tools -----------------------------------------------------------------------------
+
+/** A tool call, in the same shape as OpenAI's (DashScope also sends an `index`). */
+export const QwenToolCallSchema = z.looseObject({
+  id: z.string().default(""),
+  type: z.literal("function").default("function"),
+  function: z.object({ name: z.string(), arguments: z.string().default("") }),
+});
+export type QwenToolCall = z.infer<typeof QwenToolCallSchema>;
+
+/** A tool definition, in the same shape as OpenAI's. */
+export const QwenToolSchema = z.object({
+  type: z.literal("function").default("function"),
+  function: z.object({
+    name: z.string(),
+    description: z.string().nullish(),
+    parameters: z.record(z.string(), z.unknown()).nullish(),
+  }),
+});
+export type QwenTool = z.infer<typeof QwenToolSchema>;
+
 // ---- Request ---------------------------------------------------------------------------
 
 /** Message in DashScope native format. */
 export const QwenMessageSchema = z.object({
-  role: z.enum(["system", "user", "assistant"]),
+  role: z.enum(["system", "user", "assistant", "tool"]),
   content: z.string(),
+  tool_calls: z.array(QwenToolCallSchema).nullish(),
+  tool_call_id: z.string().nullish(),
 });
 export type QwenMessage = z.infer<typeof QwenMessageSchema>;
 
@@ -31,6 +54,15 @@ export const QwenParametersSchema = z.looseObject({
   seed: z.number().int().nullish(),
   enable_search: z.boolean().nullish(),
   repetition_penalty: z.number().nullish(),
+  // Tools must go under `parameters`, and need result_format "message".
+  tools: z.array(QwenToolSchema).nullish(),
+  tool_choice: z
+    .union([
+      z.enum(["auto", "none", "required"]),
+      z.object({ type: z.literal("function"), function: z.object({ name: z.string() }) }),
+    ])
+    .nullish(),
+  parallel_tool_calls: z.boolean().nullish(),
 });
 export type QwenParameters = z.infer<typeof QwenParametersSchema>;
 
@@ -47,7 +79,9 @@ export type QwenRequest = z.infer<typeof QwenRequestSchema>;
 /** Message inside a DashScope response choice. */
 export const QwenResponseMessageSchema = z.object({
   role: z.literal("assistant").default("assistant"),
-  content: z.string().default(""),
+  // May be null or empty when the model only asks for tool calls.
+  content: z.string().nullable().default(""),
+  tool_calls: z.array(QwenToolCallSchema).nullish(),
 });
 export type QwenResponseMessage = z.infer<typeof QwenResponseMessageSchema>;
 

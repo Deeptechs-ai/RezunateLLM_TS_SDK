@@ -9,7 +9,7 @@ import { ChatCompletionRequestSchema, MessageSchema, Role } from "../src/rezunat
 import { AnthropicProvider } from "../src/rezunateLlmSdk/providers/anthropicProvider";
 import { dropNones } from "../src/rezunateLlmSdk/providers/base";
 import { GoogleProvider } from "../src/rezunateLlmSdk/providers/googleProvider";
-import { mockApiKey, mockFetch, openaiResponse } from "./fixtures";
+import { mockApiKey, mockFetch, openaiResponse, qwenResponse } from "./fixtures";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -325,5 +325,75 @@ describe("Gemini tool calls", () => {
     // Forced to tool_calls when functionCall parts are present; Gemini's own "STOP" is kept.
     expect(result.choices[0]?.finish_reason).toBe("tool_calls");
     expect(result.choices[0]?.provider_finish_reason).toBe("STOP");
+  });
+});
+
+// New in the TS port: the Python SDK drops tools on Qwen.
+describe("Qwen tool calls", () => {
+  it("sends tools under parameters, with tool calls and tool messages unchanged", async () => {
+    const fetch = mockFetch({ json: qwenResponse() });
+
+    await chatComplete({
+      provider: "qwen",
+      apiKey: mockApiKey,
+      request: {
+        model: "qwen-plus",
+        messages: [
+          { role: "user", content: "Weather in Paris?" },
+          { role: "assistant", tool_calls: [weatherCall] },
+          { role: "tool", content: '{"temp":18}', tool_call_id: "call_1" },
+        ],
+        tools: [weatherTool],
+        tool_choice: { type: "function", function: { name: "get_weather" } },
+        parallel_tool_calls: true,
+      },
+    });
+
+    const body = JSON.parse(String(fetch.mock.calls[0]?.[1]?.body));
+    expect(body.input.messages.slice(1)).toEqual([
+      { role: "assistant", content: "", tool_calls: [weatherCall] },
+      { role: "tool", content: '{"temp":18}', tool_call_id: "call_1" },
+    ]);
+    expect(body.parameters).toMatchObject({
+      result_format: "message",
+      tools: [weatherTool],
+      tool_choice: { type: "function", function: { name: "get_weather" } },
+      parallel_tool_calls: true,
+    });
+  });
+
+  it("returns the tool calls from the reply", async () => {
+    mockFetch({
+      json: {
+        output: {
+          choices: [
+            {
+              finish_reason: "tool_calls",
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [{ ...weatherCall, index: 0 }],
+              },
+            },
+          ],
+        },
+        usage: { input_tokens: 20, output_tokens: 8, total_tokens: 28 },
+        request_id: "req-1",
+      },
+    });
+
+    const result = await chatComplete({
+      provider: "qwen",
+      apiKey: mockApiKey,
+      request: {
+        model: "qwen-plus",
+        messages: [{ role: "user", content: "Hi" }],
+        tools: [weatherTool],
+      },
+    });
+
+    expect(result.choices[0]?.message.tool_calls).toEqual([weatherCall]);
+    expect(result.choices[0]?.finish_reason).toBe("tool_calls");
+    expect(result.choices[0]?.provider_finish_reason).toBe("tool_calls");
   });
 });
