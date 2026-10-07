@@ -8,6 +8,7 @@ import { chatComplete } from "../src/rezunateLlmSdk/gateway";
 import { ChatCompletionRequestSchema, MessageSchema, Role } from "../src/rezunateLlmSdk/models";
 import { AnthropicProvider } from "../src/rezunateLlmSdk/providers/anthropicProvider";
 import { dropNones } from "../src/rezunateLlmSdk/providers/base";
+import { GoogleProvider } from "../src/rezunateLlmSdk/providers/googleProvider";
 import { mockApiKey, mockFetch, openaiResponse } from "./fixtures";
 
 afterEach(() => {
@@ -215,5 +216,114 @@ describe("Anthropic tool calls", () => {
       function: { name: "get_weather" },
     });
     expect(JSON.parse(msg?.tool_calls?.[0]?.function.arguments ?? "")).toEqual({ city: "Tokyo" });
+  });
+});
+
+describe("Gemini tool calls", () => {
+  const google = () => new GoogleProvider({ apiKey: mockApiKey });
+
+  it("translates OpenAI tools into function declarations", () => {
+    const request = ChatCompletionRequestSchema.parse({
+      model: "gemini-2.5-flash",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [weatherTool],
+      tool_choice: "required",
+    });
+
+    const out = google().transformRequest(request);
+
+    expect(out.tools).toEqual([
+      {
+        functionDeclarations: [
+          {
+            name: "get_weather",
+            description: "Get the weather for a city",
+            parameters: { type: "object", properties: { city: { type: "string" } } },
+          },
+        ],
+      },
+    ]);
+    expect(out.toolConfig).toEqual({ functionCallingConfig: { mode: "ANY" } });
+  });
+
+  it("translates a tool_choice for a specific function", () => {
+    const request = ChatCompletionRequestSchema.parse({
+      model: "gemini-2.5-flash",
+      messages: [{ role: "user", content: "hi" }],
+      tool_choice: { type: "function", function: { name: "get_weather" } },
+    });
+
+    expect(google().transformRequest(request).toolConfig).toEqual({
+      functionCallingConfig: { mode: "ANY", allowedFunctionNames: ["get_weather"] },
+    });
+  });
+
+  it("sends assistant tool calls as functionCall and tool messages as functionResponse", () => {
+    const request = ChatCompletionRequestSchema.parse({
+      model: "gemini-2.5-flash",
+      messages: [
+        { role: "user", content: "What's the weather in Tokyo?" },
+        {
+          role: "assistant",
+          tool_calls: [
+            { id: "call_xyz", function: { name: "get_weather", arguments: '{"city":"Tokyo"}' } },
+          ],
+        },
+        {
+          role: "tool",
+          content: '{"temp":"22C"}',
+          tool_call_id: "call_xyz",
+          name: "get_weather",
+        },
+      ],
+    });
+
+    const out = google().transformRequest(request);
+
+    expect(out.contents).toEqual([
+      { role: "user", parts: [{ text: "What's the weather in Tokyo?" }] },
+      {
+        role: "model",
+        parts: [{ functionCall: { name: "get_weather", args: { city: "Tokyo" } } }],
+      },
+      {
+        role: "user",
+        parts: [{ functionResponse: { name: "get_weather", response: { temp: "22C" } } }],
+      },
+    ]);
+  });
+
+  it("returns functionCall parts as tool calls", () => {
+    const result = google().transformResponse(
+      {
+        candidates: [
+          {
+            content: {
+              role: "model",
+              parts: [
+                { text: "Looking it up." },
+                { functionCall: { name: "get_weather", args: { city: "Tokyo" } } },
+              ],
+            },
+            finishReason: "STOP",
+          },
+        ],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 },
+      },
+      "gemini-2.5-flash",
+    );
+
+    const msg = result.choices[0]?.message;
+    expect(msg?.content).toBe("Looking it up.");
+    expect(msg?.tool_calls).toHaveLength(1);
+    expect(msg?.tool_calls?.[0]).toMatchObject({
+      type: "function",
+      function: { name: "get_weather" },
+    });
+    expect(msg?.tool_calls?.[0]?.id).toMatch(/^call_[0-9a-f]{8}$/);
+    expect(JSON.parse(msg?.tool_calls?.[0]?.function.arguments ?? "")).toEqual({ city: "Tokyo" });
+    // Forced to tool_calls when functionCall parts are present; Gemini's own "STOP" is kept.
+    expect(result.choices[0]?.finish_reason).toBe("tool_calls");
+    expect(result.choices[0]?.provider_finish_reason).toBe("STOP");
   });
 });

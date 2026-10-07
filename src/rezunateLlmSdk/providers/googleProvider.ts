@@ -12,9 +12,12 @@ import {
   type Choice,
   type ChoiceDelta,
   FinishReason,
+  type Message,
   mapFinishReason,
   Provider,
   Role,
+  type Tool,
+  type ToolCall,
 } from "../models";
 import { BaseProvider, type StreamRequest, type StreamState } from "./base";
 import {
@@ -24,11 +27,14 @@ import {
   getUrl,
 } from "./endpoints";
 import {
+  type GoogleContentBlock,
   type GoogleMessage,
   type GoogleRequest,
   GoogleRequestSchema,
   GoogleResponseSchema,
   GoogleStreamChunkSchema,
+  type GoogleTool,
+  type GoogleToolConfig,
 } from "./googleModels";
 
 /** Google Gemini provider: handles transformation between OpenAI and Gemini formats. */
@@ -59,6 +65,7 @@ export class GoogleProvider extends BaseProvider {
    * Transform an OpenAI format request to Gemini format.
    * Messages become `contents` with `parts`, `assistant` becomes `model`, the system message
    * moves to `systemInstruction`, and settings go into `generationConfig`.
+   * Tool calls become `functionCall` parts, and `tool` messages become `functionResponse` parts.
    */
   transformRequest(request: ChatCompletionRequest): GoogleRequest {
     let systemContent: string | null = null;
@@ -72,8 +79,37 @@ export class GoogleProvider extends BaseProvider {
         continue;
       }
 
+      if (msg.role === Role.TOOL) {
+        let responsePayload: unknown;
+        try {
+          responsePayload = msg.content ? JSON.parse(msg.content) : {};
+        } catch {
+          responsePayload = { result: msg.content };
+        }
+        if (
+          responsePayload === null ||
+          typeof responsePayload !== "object" ||
+          Array.isArray(responsePayload)
+        ) {
+          responsePayload = { result: responsePayload };
+        }
+        googleMessages.push({
+          role: "user",
+          parts: [
+            {
+              functionResponse: {
+                // Same as Python: the tool_call_id is used when the message has no name.
+                name: msg.name || msg.tool_call_id || "tool",
+                response: responsePayload as Record<string, unknown>,
+              },
+            },
+          ],
+        });
+        continue;
+      }
+
       const googleRole = msg.role === Role.ASSISTANT ? "model" : "user";
-      googleMessages.push({ role: googleRole, parts: [{ text: msg.content || "" }] });
+      googleMessages.push({ role: googleRole, parts: messageToGoogleParts(msg) });
     }
 
     const systemInstruction = systemContent ? { parts: [{ text: systemContent }] } : null;
@@ -89,21 +125,36 @@ export class GoogleProvider extends BaseProvider {
       systemInstruction,
       generationConfig,
       safetySettings: request.safety_settings,
+      tools: translateTools(request.tools),
+      toolConfig: translateToolChoice(request.tool_choice),
     });
   }
 
   /**
    * Transform a Gemini format response to OpenAI format.
-   * Each candidate becomes a choice, with its text parts joined into `message.content`.
+   * Each candidate becomes a choice, with its text parts joined into `message.content`
+   * and its `functionCall` parts in `message.tool_calls`.
    */
   transformResponse(response: unknown, model?: string | null): ChatCompletionResponse {
     const googleResponse = GoogleResponseSchema.parse(response);
 
     let choices: Choice[] = googleResponse.candidates.map((candidate, idx) => {
       const textParts: string[] = [];
+      const toolCalls: ToolCall[] = [];
       for (const part of candidate.content?.parts ?? []) {
         if (part.text) {
           textParts.push(part.text);
+        }
+        if (part.functionCall) {
+          toolCalls.push({
+            // Gemini sends no call id, so one is made up (as in Python).
+            id: `call_${randomUUID().replaceAll("-", "").slice(0, 8)}`,
+            type: "function",
+            function: {
+              name: part.functionCall.name,
+              arguments: JSON.stringify(part.functionCall.args ?? {}),
+            },
+          });
         }
       }
 
@@ -112,8 +163,11 @@ export class GoogleProvider extends BaseProvider {
         message: {
           role: Role.ASSISTANT,
           content: textParts.length > 0 ? textParts.join("") : null,
+          ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
         },
-        finish_reason: mapFinishReason(candidate.finishReason),
+        // Gemini still says "STOP" for a tool call; the original is kept.
+        finish_reason:
+          toolCalls.length > 0 ? FinishReason.TOOL_CALLS : mapFinishReason(candidate.finishReason),
         provider_finish_reason: candidate.finishReason,
       };
     });
@@ -218,4 +272,59 @@ export class GoogleProvider extends BaseProvider {
 /** Put the model into an endpoint, encoded so "?" or "/" in a name can't change the path. */
 function withModel(endpoint: string, model?: string | null): string {
   return endpoint.replaceAll("{model}", encodeURIComponent(model ?? ""));
+}
+
+/** Render an assistant/user message as Gemini parts: its text, then any tool calls. */
+function messageToGoogleParts(msg: Message): GoogleContentBlock[] {
+  const parts: GoogleContentBlock[] = [];
+  if (msg.content) {
+    parts.push({ text: msg.content });
+  }
+  for (const call of msg.tool_calls ?? []) {
+    let args: unknown;
+    try {
+      args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+    } catch {
+      args = { _raw: call.function.arguments };
+    }
+    parts.push({
+      functionCall: { name: call.function.name, args: args as Record<string, unknown> },
+    });
+  }
+  if (parts.length === 0) {
+    parts.push({ text: "" });
+  }
+  return parts;
+}
+
+/** Translate OpenAI-shaped tools into Gemini's `functionDeclarations`. */
+function translateTools(tools: Tool[] | null | undefined): GoogleTool[] | null {
+  if (!tools || tools.length === 0) {
+    return null;
+  }
+  const declarations = tools.map((tool) => ({
+    name: tool.function.name,
+    description: tool.function.description || "",
+    parameters:
+      Object.keys(tool.function.parameters).length > 0
+        ? tool.function.parameters
+        : { type: "object", properties: {} },
+  }));
+  return [{ functionDeclarations: declarations }];
+}
+
+/** Translate OpenAI-shaped `tool_choice` into Gemini's `toolConfig`. */
+function translateToolChoice(
+  toolChoice: ChatCompletionRequest["tool_choice"],
+): GoogleToolConfig | null {
+  if (toolChoice == null) {
+    return null;
+  }
+  if (typeof toolChoice === "string") {
+    const mode = ({ auto: "AUTO", none: "NONE", required: "ANY" } as const)[toolChoice];
+    return { functionCallingConfig: { mode } };
+  }
+  return {
+    functionCallingConfig: { mode: "ANY", allowedFunctionNames: [toolChoice.function.name] },
+  };
 }
