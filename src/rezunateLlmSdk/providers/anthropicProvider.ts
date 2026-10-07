@@ -274,9 +274,12 @@ function translateTools(tools: Tool[] | null | undefined): AnthropicTool[] | nul
 function translateToolChoice(
   toolChoice: ChatCompletionRequest["tool_choice"],
 ): AnthropicToolChoice | null {
-  // Same as Python: "none" is not sent, so Anthropic's default ("auto") applies.
-  if (toolChoice == null || toolChoice === "none") {
+  if (toolChoice == null) {
     return null;
+  }
+  // Sent explicitly (Python leaves it out, so Anthropic's default "auto" would apply).
+  if (toolChoice === "none") {
+    return { type: "none" };
   }
   if (toolChoice === "auto") {
     return { type: "auto" };

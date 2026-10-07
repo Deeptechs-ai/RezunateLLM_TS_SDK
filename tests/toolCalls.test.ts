@@ -154,6 +154,18 @@ describe("Anthropic tool calls", () => {
     });
   });
 
+  // New in the TS port: Python leaves "none" out, so Anthropic's default ("auto") applies.
+  it("sends tool_choice none", () => {
+    const request = ChatCompletionRequestSchema.parse({
+      model: "claude-sonnet-4-5",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [weatherTool],
+      tool_choice: "none",
+    });
+
+    expect(anthropic().transformRequest(request).tool_choice).toEqual({ type: "none" });
+  });
+
   it("sends assistant tool calls as tool_use blocks and tool messages as tool_result", () => {
     const request = ChatCompletionRequestSchema.parse({
       model: "claude-sonnet-4-5",
@@ -308,7 +320,35 @@ describe("Gemini tool calls", () => {
     const out = google().transformRequest(request);
 
     expect(out.contents[2]?.parts[0]?.functionResponse?.name).toBe("get_weather");
-    expect(out.contents[3]?.parts[0]?.functionResponse?.name).toBe("call_unknown");
+    expect(out.contents[2]?.parts[1]?.functionResponse?.name).toBe("call_unknown");
+  });
+
+  // New in the TS port: Python sends one message per tool result, which Gemini rejects.
+  it("puts the results of parallel tool calls in one message", () => {
+    const request = ChatCompletionRequestSchema.parse({
+      model: "gemini-2.5-flash",
+      messages: [
+        { role: "user", content: "Weather in Paris and Tokyo?" },
+        {
+          role: "assistant",
+          tool_calls: [
+            { id: "call_1", function: { name: "get_weather", arguments: '{"city":"Paris"}' } },
+            { id: "call_2", function: { name: "get_weather", arguments: '{"city":"Tokyo"}' } },
+          ],
+        },
+        { role: "tool", content: '{"temp":18}', tool_call_id: "call_1" },
+        { role: "tool", content: '{"temp":22}', tool_call_id: "call_2" },
+        { role: "user", content: "Thanks" },
+      ],
+    });
+
+    const out = google().transformRequest(request);
+
+    expect(out.contents.map((c) => c.role)).toEqual(["user", "model", "user", "user"]);
+    expect(out.contents[2]?.parts).toEqual([
+      { functionResponse: { name: "get_weather", response: { temp: 18 } } },
+      { functionResponse: { name: "get_weather", response: { temp: 22 } } },
+    ]);
   });
 
   it("returns functionCall parts as tool calls", () => {
@@ -378,6 +418,22 @@ describe("Qwen tool calls", () => {
       tool_choice: { type: "function", function: { name: "get_weather" } },
       parallel_tool_calls: true,
     });
+  });
+
+  it("sends a tool message without content as an empty string", async () => {
+    const fetch = mockFetch({ json: qwenResponse() });
+
+    await chatComplete({
+      provider: "qwen",
+      apiKey: mockApiKey,
+      request: {
+        model: "qwen-plus",
+        messages: [{ role: "tool", content: null, tool_call_id: "call_1" }],
+      },
+    });
+
+    const body = JSON.parse(String(fetch.mock.calls[0]?.[1]?.body));
+    expect(body.input.messages).toEqual([{ role: "tool", content: "", tool_call_id: "call_1" }]);
   });
 
   it("returns the tool calls from the reply", async () => {

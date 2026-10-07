@@ -49,9 +49,13 @@ export const AnthropicToolSchema = z.object({
 });
 export type AnthropicTool = z.infer<typeof AnthropicToolSchema>;
 
-/** Tool choice: `auto` (model decides), `any` (must call one tool) or `tool` (this tool). */
+/**
+ * Tool choice: `auto` (model decides), `any` (must call one tool), `tool` (this tool)
+ * or `none` (no tool calls).
+ */
 export const AnthropicToolChoiceSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("auto") }),
+  z.object({ type: z.literal("none") }),
   z.object({ type: z.literal("any") }),
   z.object({ type: z.literal("tool"), name: z.string() }),
 ]);

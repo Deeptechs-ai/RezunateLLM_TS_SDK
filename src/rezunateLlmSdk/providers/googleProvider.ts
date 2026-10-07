@@ -70,6 +70,8 @@ export class GoogleProvider extends BaseProvider {
   transformRequest(request: ChatCompletionRequest): GoogleRequest {
     let systemContent: string | null = null;
     const googleMessages: GoogleMessage[] = [];
+    // The message collecting tool results, while tool messages follow each other.
+    let toolResults: GoogleMessage | null = null;
 
     // Gemini matches a tool result by function name, so remember each tool call's name by id.
     const toolNamesById = new Map<string, string>();
@@ -101,25 +103,28 @@ export class GoogleProvider extends BaseProvider {
         ) {
           responsePayload = { result: responsePayload };
         }
-        googleMessages.push({
-          role: "user",
-          parts: [
-            {
-              functionResponse: {
-                // Without a name, use the name of the tool call it answers (Python uses the id).
-                name:
-                  msg.name ||
-                  (msg.tool_call_id && toolNamesById.get(msg.tool_call_id)) ||
-                  msg.tool_call_id ||
-                  "tool",
-                response: responsePayload as Record<string, unknown>,
-              },
-            },
-          ],
-        });
+        const part: GoogleContentBlock = {
+          functionResponse: {
+            // Without a name, use the name of the tool call it answers (Python uses the id).
+            name:
+              msg.name ||
+              (msg.tool_call_id && toolNamesById.get(msg.tool_call_id)) ||
+              msg.tool_call_id ||
+              "tool",
+            response: responsePayload as Record<string, unknown>,
+          },
+        };
+        // Gemini wants all results of one turn's (parallel) calls in a single message.
+        if (toolResults) {
+          toolResults.parts.push(part);
+        } else {
+          toolResults = { role: "user", parts: [part] };
+          googleMessages.push(toolResults);
+        }
         continue;
       }
 
+      toolResults = null;
       const googleRole = msg.role === Role.ASSISTANT ? "model" : "user";
       googleMessages.push({ role: googleRole, parts: messageToGoogleParts(msg) });
     }

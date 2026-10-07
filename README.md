@@ -308,6 +308,8 @@ The TypeScript SDK is meant to behave like the Python SDK. These differences are
 11. **Qwen supports tool calls.** Tools, `tool_choice`, `parallel_tool_calls`, tool calls in replies and `tool` messages work with Qwen (DashScope uses OpenAI's tool format). The Python SDK drops tools on Qwen and rejects `tool` messages.
 12. **`function_call` means a tool call.** `function_call` is OpenAI's old name for `tool_calls`, and OpenAI-compatible APIs such as Meta's may still send it. The TS SDK translates it to `finish_reason: "tool_calls"`; the Python SDK rejects the reply.
 13. **Gemini tool results find their function name.** Gemini matches a tool result by function name, not by id. When a `tool` message has no `name`, the TS SDK takes the name from the tool call with the same `tool_call_id` earlier in the conversation. The Python SDK sends the `tool_call_id` as the name, which Gemini may not match.
+14. **Anthropic `tool_choice: "none"` is sent.** The TS SDK sends it as `{ "type": "none" }`, so Claude calls no tools. The Python SDK leaves it out, so Anthropic's default (`auto`) applies and the model may still call a tool.
+15. **Gemini gets parallel tool results together.** When the model calls several tools at once, Gemini needs all their results in one message. The TS SDK groups `tool` messages that follow each other into one message; the Python SDK sends one message per result, which Gemini rejects.
 
 ## Known limitations
 
@@ -315,7 +317,6 @@ These behave the same as in the Python SDK and will be improved in later feature
 
 - **Several system messages (Anthropic, Google):** these providers take a single system prompt, so when a request has more than one `system` message, only the last one is sent.
 - **No tool calls in streams:** with `stream: true`, tools are sent, but the tool calls in the reply are dropped (chunks carry only text). OpenAI-format providers and Anthropic still end with `finish_reason: "tool_calls"`; Gemini ends with `"stop"`. Use normal chat for tool calls.
-- **Anthropic `tool_choice: "none"`** is not sent, so Anthropic's default applies and the model may still call a tool. To be sure no tool is called, leave out `tools`.
 
 ## License
 

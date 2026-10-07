@@ -83,8 +83,9 @@ export class QwenProvider extends BaseProvider {
       input: {
         messages: request.messages.map((msg) => ({
           role: msg.role,
-          // An assistant message that only calls tools may have no text.
-          content: msg.tool_calls?.length ? (msg.content ?? "") : msg.content,
+          // A tool call or tool result may have no text; DashScope needs a string.
+          content:
+            msg.tool_calls?.length || msg.role === Role.TOOL ? (msg.content ?? "") : msg.content,
           tool_calls: msg.tool_calls,
           tool_call_id: msg.tool_call_id,
         })),
