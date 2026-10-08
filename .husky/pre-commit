@@ -1,0 +1,6 @@
+# Use the Node version from .nvmrc when nvm is installed (commits from an IDE may start on another version).
+[ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" && nvm use --silent >/dev/null 2>&1
+
+pnpm exec lint-staged
+pnpm typecheck
+pnpm test

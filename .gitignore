@@ -141,3 +141,9 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Local only, not pushed: Claude Code settings and notes, and our own working docs (docs/)
+.claude/
+CLAUDE.local.md
+CLAUDE.md
+docs/
