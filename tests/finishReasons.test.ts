@@ -5,17 +5,12 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ANTHROPIC_STOP_REASONS, GOOGLE_FINISH_REASONS } from "../src/rezunateLlmSdk/constants";
 import { chatComplete } from "../src/rezunateLlmSdk/gateway";
 import { mapFinishReason } from "../src/rezunateLlmSdk/models";
-import {
-  ANTHROPIC_STOP_REASONS,
-  AnthropicResponseSchema,
-} from "../src/rezunateLlmSdk/providers/anthropicModels";
+import { AnthropicResponseSchema } from "../src/rezunateLlmSdk/providers/anthropicModels";
 import { AnthropicProvider } from "../src/rezunateLlmSdk/providers/anthropicProvider";
-import {
-  GOOGLE_FINISH_REASONS,
-  GoogleResponseSchema,
-} from "../src/rezunateLlmSdk/providers/googleModels";
+import { GoogleResponseSchema } from "../src/rezunateLlmSdk/providers/googleModels";
 import { GoogleProvider } from "../src/rezunateLlmSdk/providers/googleProvider";
 import {
   anthropicResponse,
