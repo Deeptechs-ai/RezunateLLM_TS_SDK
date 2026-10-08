@@ -1332,4 +1332,63 @@ describe("stream tool calls", () => {
     ]);
     expect(chunks.at(-1)?.choices[0]?.finish_reason).toBe("tool_calls");
   });
+
+  /** A DashScope stream frame carrying one tool-call piece, in DashScope's text format. */
+  function qwenToolFrame(piece: object, finishReason = "null"): string {
+    const data = {
+      output: {
+        choices: [
+          {
+            message: { role: "assistant", content: "", tool_calls: [piece] },
+            finish_reason: finishReason,
+          },
+        ],
+      },
+      usage: { input_tokens: 20, output_tokens: 5, total_tokens: 25 },
+      request_id: "req-1",
+    };
+    return `id:1\nevent:result\n:HTTP_STATUS/200\ndata:${JSON.stringify(data)}\n\n`;
+  }
+
+  it("turns DashScope's streamed tool calls into OpenAI tool-call pieces", async () => {
+    mockStreamFetch({
+      pieces: [
+        qwenToolFrame({
+          index: 0,
+          id: "call_q1",
+          type: "function",
+          function: { name: "get_weather", arguments: '{"city":' },
+        }),
+        qwenToolFrame({ index: 0, id: "", function: { arguments: '"Paris"}' } }, "tool_calls"),
+      ],
+    });
+
+    const chunks = await collect(streamingProvider("qwen").stream(hiRequest("qwen-plus")));
+
+    expect(chunks[1]?.choices[0]?.delta.tool_calls).toEqual([
+      { index: 0, function: { arguments: '"Paris"}' } },
+    ]);
+    expect(joinToolCalls(chunks)).toEqual([
+      { id: "call_q1", name: "get_weather", arguments: '{"city":"Paris"}' },
+    ]);
+    expect(chunks.at(-1)?.choices[0]?.finish_reason).toBe("tool_calls");
+  });
+
+  it("passes tool_stream to DashScope when it is set", async () => {
+    const fetch = mockStreamFetch({ pieces: [] });
+
+    await collect(
+      streamingProvider("qwen").stream(
+        ChatCompletionRequestSchema.parse({
+          model: "qwen-plus",
+          messages: [{ role: "user", content: "Hi" }],
+          stream: true,
+          tool_stream: true,
+        }),
+      ),
+    );
+
+    const body = JSON.parse(String(fetch.mock.calls[0]?.[1]?.body));
+    expect(body.parameters).toMatchObject({ incremental_output: true, tool_stream: true });
+  });
 });

@@ -128,7 +128,10 @@ export class QwenProvider extends BaseProvider {
                   (call): ToolCall => ({
                     id: call.id,
                     type: "function",
-                    function: { name: call.function.name, arguments: call.function.arguments },
+                    function: {
+                      name: call.function?.name ?? "",
+                      arguments: call.function?.arguments ?? "",
+                    },
                   }),
                 ),
               }
@@ -174,9 +177,14 @@ export class QwenProvider extends BaseProvider {
   protected override buildStreamRequest(request: ChatCompletionRequest): StreamRequest {
     const qwenRequest = this.transformRequest(request);
     // Ensure incremental_output is enabled so each frame is a delta.
+    // tool_stream (streaming only) streams complex tool arguments in pieces when set.
     const body = {
       ...qwenRequest,
-      parameters: { ...qwenRequest.parameters, incremental_output: true },
+      parameters: {
+        ...qwenRequest.parameters,
+        incremental_output: true,
+        tool_stream: typeof request.tool_stream === "boolean" ? request.tool_stream : undefined,
+      },
     };
     const headers = { ...this.getHeaders(), [DASHSCOPE_SSE_HEADER]: "enable" };
     return { url: getUrl(this.baseUrl, this.getEndpoint()), body, headers };
@@ -216,10 +224,21 @@ export class QwenProvider extends BaseProvider {
         usagePayload.total_tokens || usagePayload.input_tokens + usagePayload.output_tokens,
     };
 
+    // DashScope already streams OpenAI-shaped pieces; later pieces have an empty id and no name.
+    const toolCalls = (first?.message.tool_calls ?? []).map((piece, i) => ({
+      index: piece.index ?? i,
+      ...(piece.id ? { id: piece.id } : {}),
+      ...(piece.type ? { type: piece.type } : {}),
+      function: {
+        ...(piece.function?.name ? { name: piece.function.name } : {}),
+        arguments: piece.function?.arguments ?? "",
+      },
+    }));
+
     // Skip frames that carry neither content nor a terminal signal, once the role is sent.
     // (Python marks the role as sent before this check, so an empty first frame loses it.)
     const sendRole = !state.roleSent;
-    if (!text && finishReason === null && usage === null && !sendRole) {
+    if (!text && toolCalls.length === 0 && finishReason === null && usage === null && !sendRole) {
       return null;
     }
 
@@ -230,6 +249,9 @@ export class QwenProvider extends BaseProvider {
     }
     if (text) {
       delta.content = text;
+    }
+    if (toolCalls.length > 0) {
+      delta.tool_calls = toolCalls;
     }
 
     // Prefer the per-frame request_id over the state's uuid placeholder.
