@@ -175,9 +175,7 @@ export class GoogleProvider extends BaseProvider {
           content: textParts.length > 0 ? textParts.join("") : null,
           ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
         },
-        // Gemini still says "STOP" for a tool call; the original is kept.
-        finish_reason:
-          toolCalls.length > 0 ? FinishReason.TOOL_CALLS : mapFinishReason(candidate.finishReason),
+        finish_reason: toolAwareFinishReason(candidate.finishReason, toolCalls.length > 0),
         provider_finish_reason: candidate.finishReason,
       };
     });
@@ -266,12 +264,9 @@ export class GoogleProvider extends BaseProvider {
       delta.content = text;
     }
     // Gemini sends each function call whole, so each becomes one complete tool-call piece.
-    const toolCalls = (candidate?.content?.parts ?? [])
-      .filter((part) => part.functionCall)
-      .map((part) => ({
-        index: state.toolCallCount++,
-        ...toToolCall(part.functionCall as GoogleFunctionCall),
-      }));
+    const toolCalls = (candidate?.content?.parts ?? []).flatMap((part) =>
+      part.functionCall ? [{ index: state.toolCallCount++, ...toToolCall(part.functionCall) }] : [],
+    );
     if (toolCalls.length > 0) {
       delta.tool_calls = toolCalls;
     }
@@ -284,12 +279,21 @@ export class GoogleProvider extends BaseProvider {
     const choice = chunk.choices[0];
     if (!candidate && choice) {
       choice.finish_reason = FinishReason.CONTENT_FILTER;
-    } else if (choice?.finish_reason && state.toolCallCount > 0) {
-      // Gemini says "STOP" for a tool call; the original stays in provider_finish_reason.
-      choice.finish_reason = FinishReason.TOOL_CALLS;
+    } else if (choice?.finish_reason && candidate) {
+      choice.finish_reason = toolAwareFinishReason(candidate.finishReason, state.toolCallCount > 0);
     }
     return chunk;
   }
+}
+
+/**
+ * Gemini says "STOP" when it asks for a tool call, so that becomes `tool_calls`.
+ * Any other reason (e.g. MAX_TOKENS, SAFETY) is kept, so a cut-off call isn't hidden.
+ */
+function toolAwareFinishReason(reason: string | null, hasToolCalls: boolean): FinishReason {
+  return hasToolCalls && (reason === null || reason === "STOP")
+    ? FinishReason.TOOL_CALLS
+    : mapFinishReason(reason);
 }
 
 /**

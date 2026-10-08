@@ -1333,6 +1333,18 @@ describe("stream tool calls", () => {
     expect(chunks.at(-1)?.choices[0]?.finish_reason).toBe("tool_calls");
   });
 
+  it("keeps a non-STOP Gemini finish reason after a tool call", async () => {
+    mockStreamFetch({
+      pieces: [sseData(geminiCallFrame(["Paris"]), geminiCallFrame([], "MAX_TOKENS"))],
+    });
+
+    const chunks = await collect(streamingProvider("google").stream(geminiRequest()));
+
+    // A cut-off call must not look like a finished one.
+    expect(chunks.at(-1)?.choices[0]?.finish_reason).toBe("length");
+    expect(chunks.at(-1)?.choices[0]?.provider_finish_reason).toBe("MAX_TOKENS");
+  });
+
   /** A DashScope stream frame carrying one tool-call piece, in DashScope's text format. */
   function qwenToolFrame(piece: object, finishReason = "null"): string {
     const data = {

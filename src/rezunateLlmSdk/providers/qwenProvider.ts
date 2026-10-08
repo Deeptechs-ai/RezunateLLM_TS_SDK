@@ -128,6 +128,7 @@ export class QwenProvider extends BaseProvider {
                   (call): ToolCall => ({
                     id: call.id,
                     type: "function",
+                    // A full (non-streamed) reply always has the name; "" only guards the type.
                     function: {
                       name: call.function?.name ?? "",
                       arguments: call.function?.arguments ?? "",
@@ -183,7 +184,7 @@ export class QwenProvider extends BaseProvider {
       parameters: {
         ...qwenRequest.parameters,
         incremental_output: true,
-        tool_stream: typeof request.tool_stream === "boolean" ? request.tool_stream : undefined,
+        ...(typeof request.tool_stream === "boolean" ? { tool_stream: request.tool_stream } : {}),
       },
     };
     const headers = { ...this.getHeaders(), [DASHSCOPE_SSE_HEADER]: "enable" };
