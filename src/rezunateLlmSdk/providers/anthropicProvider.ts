@@ -179,7 +179,7 @@ export class AnthropicProvider extends BaseProvider {
     data: string,
     state: StreamState,
   ): ChatCompletionChunk | null {
-    if (event === "ping" || event === "content_block_start" || event === "content_block_stop") {
+    if (event === "ping" || event === "content_block_stop") {
       return null;
     }
 
@@ -196,10 +196,39 @@ export class AnthropicProvider extends BaseProvider {
       return this.makeChunk(state, { delta: { role: Role.ASSISTANT, content: "" } });
     }
 
+    if (event === "content_block_start") {
+      const block = payload.content_block;
+      if (block?.type !== "tool_use") {
+        return null;
+      }
+      // Tools are numbered 0, 1, … in the order they start, like OpenAI's index.
+      const index = state.toolCallCount++;
+      state.toolIndexByBlock.set(payload.index ?? 0, index);
+      return this.makeChunk(state, {
+        delta: {
+          tool_calls: [
+            {
+              index,
+              id: block.id,
+              type: "function",
+              function: { name: block.name, arguments: "" },
+            },
+          ],
+        },
+      });
+    }
+
     if (event === "content_block_delta") {
       const text = payload.delta?.text;
       if (payload.delta?.type === "text_delta" && text) {
         return this.makeChunk(state, { delta: { content: text } });
+      }
+      const json = payload.delta?.partial_json;
+      const index = state.toolIndexByBlock.get(payload.index ?? 0);
+      if (payload.delta?.type === "input_json_delta" && json && index !== undefined) {
+        return this.makeChunk(state, {
+          delta: { tool_calls: [{ index, function: { arguments: json } }] },
+        });
       }
       return null;
     }

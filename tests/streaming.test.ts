@@ -1200,4 +1200,88 @@ describe("stream tool calls", () => {
       { id: "call_9", name: "get_weather", arguments: '{"city":"Paris"}' },
     ]);
   });
+
+  /** Anthropic events for one tool_use block at `block`, with its JSON split into pieces. */
+  function anthropicToolBlock(block: number, id: string, city: string): string[] {
+    return [
+      sseEvent("content_block_start", {
+        index: block,
+        content_block: { type: "tool_use", id, name: "get_weather", input: {} },
+      }),
+      sseEvent("content_block_delta", {
+        index: block,
+        delta: { type: "input_json_delta", partial_json: "" },
+      }),
+      sseEvent("content_block_delta", {
+        index: block,
+        delta: { type: "input_json_delta", partial_json: '{"city":' },
+      }),
+      sseEvent("content_block_delta", {
+        index: block,
+        delta: { type: "input_json_delta", partial_json: `"${city}"}` },
+      }),
+      sseEvent("content_block_stop", { index: block }),
+    ];
+  }
+
+  it("turns Anthropic tool_use events into OpenAI tool-call pieces", async () => {
+    mockStreamFetch({
+      pieces: [
+        anthropicStream()[0] ?? "",
+        sseEvent("content_block_start", { index: 0, content_block: { type: "text", text: "" } }),
+        sseEvent("content_block_delta", {
+          index: 0,
+          delta: { type: "text_delta", text: "Let me check." },
+        }),
+        sseEvent("content_block_stop", { index: 0 }),
+        ...anthropicToolBlock(1, "toolu_1", "Paris"),
+        sseEvent("message_delta", {
+          delta: { stop_reason: "tool_use" },
+          usage: { output_tokens: 9 },
+        }),
+        sseEvent("message_stop", {}),
+      ],
+    });
+
+    const chunks = await collect(streamingProvider("anthropic").stream(anthropicRequest()));
+
+    expect(chunks.map((c) => c.choices[0]?.delta.content ?? "").join("")).toBe("Let me check.");
+    expect(
+      chunks.find((c) => c.choices[0]?.delta.tool_calls)?.choices[0]?.delta.tool_calls,
+    ).toEqual([
+      {
+        index: 0,
+        id: "toolu_1",
+        type: "function",
+        function: { name: "get_weather", arguments: "" },
+      },
+    ]);
+    expect(joinToolCalls(chunks)).toEqual([
+      { id: "toolu_1", name: "get_weather", arguments: '{"city":"Paris"}' },
+    ]);
+    expect(chunks.at(-1)?.choices[0]?.finish_reason).toBe("tool_calls");
+    expect(chunks.at(-1)?.choices[0]?.provider_finish_reason).toBe("tool_use");
+  });
+
+  it("numbers parallel Anthropic tool calls 0 and 1", async () => {
+    mockStreamFetch({
+      pieces: [
+        anthropicStream()[0] ?? "",
+        ...anthropicToolBlock(0, "toolu_a", "Paris"),
+        ...anthropicToolBlock(1, "toolu_b", "Tokyo"),
+        sseEvent("message_delta", {
+          delta: { stop_reason: "tool_use" },
+          usage: { output_tokens: 20 },
+        }),
+        sseEvent("message_stop", {}),
+      ],
+    });
+
+    const chunks = await collect(streamingProvider("anthropic").stream(anthropicRequest()));
+
+    expect(joinToolCalls(chunks)).toEqual([
+      { id: "toolu_a", name: "get_weather", arguments: '{"city":"Paris"}' },
+      { id: "toolu_b", name: "get_weather", arguments: '{"city":"Tokyo"}' },
+    ]);
+  });
 });
