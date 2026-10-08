@@ -28,6 +28,7 @@ import {
 } from "./endpoints";
 import {
   type GoogleContentBlock,
+  type GoogleFunctionCall,
   type GoogleMessage,
   type GoogleRequest,
   GoogleRequestSchema,
@@ -163,15 +164,7 @@ export class GoogleProvider extends BaseProvider {
           textParts.push(part.text);
         }
         if (part.functionCall) {
-          toolCalls.push({
-            // Gemini sends no call id, so one is made up (as in Python).
-            id: `call_${randomUUID().replaceAll("-", "").slice(0, 8)}`,
-            type: "function",
-            function: {
-              name: part.functionCall.name,
-              arguments: JSON.stringify(part.functionCall.args ?? {}),
-            },
-          });
+          toolCalls.push(toToolCall(part.functionCall));
         }
       }
 
@@ -182,9 +175,7 @@ export class GoogleProvider extends BaseProvider {
           content: textParts.length > 0 ? textParts.join("") : null,
           ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
         },
-        // Gemini still says "STOP" for a tool call; the original is kept.
-        finish_reason:
-          toolCalls.length > 0 ? FinishReason.TOOL_CALLS : mapFinishReason(candidate.finishReason),
+        finish_reason: toolAwareFinishReason(candidate.finishReason, toolCalls.length > 0),
         provider_finish_reason: candidate.finishReason,
       };
     });
@@ -272,6 +263,13 @@ export class GoogleProvider extends BaseProvider {
     if (text) {
       delta.content = text;
     }
+    // Gemini sends each function call whole, so each becomes one complete tool-call piece.
+    const toolCalls = (candidate?.content?.parts ?? []).flatMap((part) =>
+      part.functionCall ? [{ index: state.toolCallCount++, ...toToolCall(part.functionCall) }] : [],
+    );
+    if (toolCalls.length > 0) {
+      delta.tool_calls = toolCalls;
+    }
 
     const chunk = this.makeChunk(state, {
       delta,
@@ -281,9 +279,33 @@ export class GoogleProvider extends BaseProvider {
     const choice = chunk.choices[0];
     if (!candidate && choice) {
       choice.finish_reason = FinishReason.CONTENT_FILTER;
+    } else if (choice?.finish_reason && candidate) {
+      choice.finish_reason = toolAwareFinishReason(candidate.finishReason, state.toolCallCount > 0);
     }
     return chunk;
   }
+}
+
+/**
+ * Gemini says "STOP" when it asks for a tool call, so that becomes `tool_calls`.
+ * Any other reason (e.g. MAX_TOKENS, SAFETY) is kept, so a cut-off call isn't hidden.
+ */
+function toolAwareFinishReason(reason: string | null, hasToolCalls: boolean): FinishReason {
+  return hasToolCalls && (reason === null || reason === "STOP")
+    ? FinishReason.TOOL_CALLS
+    : mapFinishReason(reason);
+}
+
+/**
+ * Turn a Gemini `functionCall` into an OpenAI tool call, for normal chat and streams.
+ * The id is always made up (as in Python), even if Gemini sends one.
+ */
+function toToolCall(functionCall: GoogleFunctionCall): ToolCall {
+  return {
+    id: `call_${randomUUID().replaceAll("-", "").slice(0, 8)}`,
+    type: "function",
+    function: { name: functionCall.name, arguments: JSON.stringify(functionCall.args ?? {}) },
+  };
 }
 
 /** Put the model into an endpoint, encoded so "?" or "/" in a name can't change the path. */

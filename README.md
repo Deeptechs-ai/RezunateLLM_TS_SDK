@@ -2,7 +2,7 @@
 
 Unified TypeScript SDK for chat completions across multiple AI providers, using the OpenAI request/response format. It is the TypeScript version of the Python SDK [`rezunate-llm-sdk`](https://pypi.org/project/rezunate-llm-sdk/).
 
->**Work in progress.** Chat (normal and streaming) and tool calls work with all providers. Other features of the Python SDK are being ported; see [Status](#status). The package is not published to npm yet.
+>**Work in progress.** Chat and tool calls, normal and streaming, work with all providers. Other features of the Python SDK are being ported; see [Status](#status). The package is not published to npm yet.
 
 ## Status
 
@@ -13,7 +13,7 @@ Unified TypeScript SDK for chat completions across multiple AI providers, using 
 | Automatic retries (one rule for all providers), timeouts, errors returned as a response | ✅ Done |
 | Organization-level API keys (`organization`, `project`, `workspaceId`) | ✅ Done |
 | Streaming, with the same retries and error rule for all providers | ✅ Done |
-| Tool calls (all providers, normal chat) | ✅ Done |
+| Tool calls (all providers, normal chat and streaming) | ✅ Done |
 | Prompts (fetch and render saved prompts) | ⏳ Planned |
 | Guardrails (local rules and server-side PII masking) | ⏳ Planned |
 | `Gateway` class | ⏳ Planned |
@@ -196,7 +196,32 @@ if (call) {
 | `google` | Translated to and from Gemini's `functionCall` / `functionResponse` parts. Gemini sends no call id, so one is made up (`call_…`) |
 | `qwen` | Sent under DashScope's `parameters` (also accepts `parallel_tool_calls`) |
 
-Tool calls work in normal chat only, not with `stream: true` (see [Known limitations](#known-limitations)).
+#### Tool calls in streams
+
+With `stream: true`, tool calls arrive in pieces in `delta.tool_calls`, in OpenAI's format for every provider. The first piece of a call has `index`, `id` and `function.name`; later pieces add to `function.arguments`. Join the pieces by `index` (`tools` and `history` as in the example above):
+
+```ts
+const calls: { id: string; name: string; arguments: string }[] = [];
+
+for await (const chunk of chatComplete({
+  provider: "anthropic",
+  apiKey: process.env.ANTHROPIC_API_KEY!,
+  request: { model: "claude-haiku-4-5", messages: history, tools, stream: true },
+})) {
+  for (const piece of chunk.choices[0]?.delta.tool_calls ?? []) {
+    calls[piece.index] ??= { id: "", name: "", arguments: "" };
+    const call = calls[piece.index]!;
+    call.id ||= piece.id ?? "";
+    call.name ||= piece.function?.name ?? "";
+    call.arguments += piece.function?.arguments ?? "";
+  }
+  if (chunk.choices[0]?.finish_reason === "tool_calls") {
+    console.log(calls); // [{ id: "toolu_…", name: "get_weather", arguments: '{"city":"Paris"}' }]
+  }
+}
+```
+
+Some providers send a whole call in one piece (Gemini, Grok); the same code works for both.
 
 ## Providers
 
@@ -311,13 +336,13 @@ The TypeScript SDK is meant to behave like the Python SDK. These differences are
 14. **Anthropic `tool_choice: "none"` is sent.** The TS SDK sends it as `{ "type": "none" }`, so Claude calls no tools. The Python SDK leaves it out, so Anthropic's default (`auto`) applies and the model may still call a tool.
 15. **Gemini gets parallel tool results together.** When the model calls several tools at once, Gemini needs all their results in one message. The TS SDK groups `tool` messages that follow each other into one message; the Python SDK sends one message per result, which Gemini rejects.
 16. **Gemini accepts full JSON Schema for tools.** The TS SDK sends a tool's schema to Gemini as `parametersJsonSchema`, so keywords such as `additionalProperties` (required by OpenAI's strict mode) and `$ref` work. The Python SDK uses Gemini's older `parameters` field, which rejects them with a 400 error.
+17. **Tool calls work in streams.** With `stream: true`, tool calls arrive as pieces in `delta.tool_calls` (OpenAI's format) for every provider, and Gemini ends with `finish_reason: "tool_calls"`. In the Python SDK, stream chunks carry only text, so the tool call is lost (Gemini even ends with `"stop"`).
 
 ## Known limitations
 
 These behave the same as in the Python SDK and will be improved in later features:
 
 - **Several system messages (Anthropic, Google):** these providers take a single system prompt, so when a request has more than one `system` message, only the last one is sent.
-- **No tool calls in streams:** with `stream: true`, tools are sent, but the tool calls in the reply are dropped (chunks carry only text). OpenAI-format providers and Anthropic still end with `finish_reason: "tool_calls"`; Gemini ends with `"stop"`. Use normal chat for tool calls.
 
 ## License
 

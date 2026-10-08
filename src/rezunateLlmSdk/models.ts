@@ -220,10 +220,31 @@ export const ChatCompletionResponseSchema = z.object({
 });
 export type ChatCompletionResponse = z.infer<typeof ChatCompletionResponseSchema>;
 
+/**
+ * One piece of a streamed tool call (OpenAI's `delta.tool_calls[*]`).
+ * The first piece of a call has `id`, `type` and `function.name`; later pieces add to
+ * `function.arguments`. Pieces of the same call share `index`.
+ */
+export const ToolCallDeltaSchema = z.object({
+  // Default 0, so a provider that leaves it out can't break the stream.
+  index: z.number().int().default(0),
+  id: z.string().nullish(),
+  type: z.literal("function").nullish(),
+  function: z
+    .object({
+      name: z.string().nullish(),
+      arguments: z.string().nullish(),
+    })
+    .nullish(),
+});
+export type ToolCallDelta = z.infer<typeof ToolCallDeltaSchema>;
+
 /** Incremental delta for a streaming choice (OpenAI chunk shape). */
 export const ChoiceDeltaSchema = z.object({
   role: RoleSchema.nullable().default(null),
   content: z.string().nullable().default(null),
+  /** Present only in chunks that carry tool-call pieces. */
+  tool_calls: z.array(ToolCallDeltaSchema).nullish(),
 });
 export type ChoiceDelta = z.infer<typeof ChoiceDeltaSchema>;
 
