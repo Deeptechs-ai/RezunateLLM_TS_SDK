@@ -28,6 +28,7 @@ import {
 } from "./endpoints";
 import {
   type GoogleContentBlock,
+  type GoogleFunctionCall,
   type GoogleMessage,
   type GoogleRequest,
   GoogleRequestSchema,
@@ -163,15 +164,7 @@ export class GoogleProvider extends BaseProvider {
           textParts.push(part.text);
         }
         if (part.functionCall) {
-          toolCalls.push({
-            // Gemini sends no call id, so one is made up (as in Python).
-            id: `call_${randomUUID().replaceAll("-", "").slice(0, 8)}`,
-            type: "function",
-            function: {
-              name: part.functionCall.name,
-              arguments: JSON.stringify(part.functionCall.args ?? {}),
-            },
-          });
+          toolCalls.push(toToolCall(part.functionCall));
         }
       }
 
@@ -272,6 +265,16 @@ export class GoogleProvider extends BaseProvider {
     if (text) {
       delta.content = text;
     }
+    // Gemini sends each function call whole, so each becomes one complete tool-call piece.
+    const toolCalls = (candidate?.content?.parts ?? [])
+      .filter((part) => part.functionCall)
+      .map((part) => ({
+        index: state.toolCallCount++,
+        ...toToolCall(part.functionCall as GoogleFunctionCall),
+      }));
+    if (toolCalls.length > 0) {
+      delta.tool_calls = toolCalls;
+    }
 
     const chunk = this.makeChunk(state, {
       delta,
@@ -281,9 +284,24 @@ export class GoogleProvider extends BaseProvider {
     const choice = chunk.choices[0];
     if (!candidate && choice) {
       choice.finish_reason = FinishReason.CONTENT_FILTER;
+    } else if (choice?.finish_reason && state.toolCallCount > 0) {
+      // Gemini says "STOP" for a tool call; the original stays in provider_finish_reason.
+      choice.finish_reason = FinishReason.TOOL_CALLS;
     }
     return chunk;
   }
+}
+
+/**
+ * Turn a Gemini `functionCall` into an OpenAI tool call, for normal chat and streams.
+ * The id is always made up (as in Python), even if Gemini sends one.
+ */
+function toToolCall(functionCall: GoogleFunctionCall): ToolCall {
+  return {
+    id: `call_${randomUUID().replaceAll("-", "").slice(0, 8)}`,
+    type: "function",
+    function: { name: functionCall.name, arguments: JSON.stringify(functionCall.args ?? {}) },
+  };
 }
 
 /** Put the model into an endpoint, encoded so "?" or "/" in a name can't change the path. */

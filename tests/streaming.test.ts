@@ -1284,4 +1284,52 @@ describe("stream tool calls", () => {
       { id: "toolu_b", name: "get_weather", arguments: '{"city":"Tokyo"}' },
     ]);
   });
+
+  /** A Gemini frame with function calls for the given cities. */
+  function geminiCallFrame(cities: string[], finishReason?: string) {
+    return {
+      candidates: [
+        {
+          content: {
+            role: "model",
+            parts: cities.map((city) => ({
+              functionCall: { name: "get_weather", args: { city } },
+            })),
+          },
+          ...(finishReason ? { finishReason } : {}),
+        },
+      ],
+    };
+  }
+
+  it("turns a Gemini functionCall into one complete tool-call piece", async () => {
+    mockStreamFetch({ pieces: [sseData(geminiCallFrame(["Paris"], "STOP"))] });
+
+    const chunks = await collect(streamingProvider("google").stream(geminiRequest()));
+
+    const piece = chunks[0]?.choices[0]?.delta.tool_calls?.[0];
+    expect(piece).toMatchObject({
+      index: 0,
+      type: "function",
+      function: { name: "get_weather", arguments: '{"city":"Paris"}' },
+    });
+    expect(piece?.id).toMatch(/^call_[0-9a-f]{8}$/);
+    // Gemini says "STOP" for a tool call; finish_reason still tells the caller to run it.
+    expect(chunks.at(-1)?.choices[0]?.finish_reason).toBe("tool_calls");
+    expect(chunks.at(-1)?.choices[0]?.provider_finish_reason).toBe("STOP");
+  });
+
+  it("numbers parallel Gemini calls across frames 0 and 1", async () => {
+    mockStreamFetch({
+      pieces: [sseData(geminiCallFrame(["Paris"]), geminiCallFrame(["Tokyo"], "STOP"))],
+    });
+
+    const chunks = await collect(streamingProvider("google").stream(geminiRequest()));
+
+    expect(joinToolCalls(chunks).map((c) => [c.name, c.arguments])).toEqual([
+      ["get_weather", '{"city":"Paris"}'],
+      ["get_weather", '{"city":"Tokyo"}'],
+    ]);
+    expect(chunks.at(-1)?.choices[0]?.finish_reason).toBe("tool_calls");
+  });
 });
