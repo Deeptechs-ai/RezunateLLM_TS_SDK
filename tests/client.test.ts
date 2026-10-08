@@ -50,6 +50,25 @@ describe("RouterClient", () => {
     expect(client.timeout).toBe(30);
   });
 
+  it("removes trailing slashes from the base URL", async () => {
+    vi.stubEnv("REZUNATE_LLM_BASE_URL", "http://localhost:8000/");
+    const fetch = mockFetch({ json: {} });
+
+    await new RouterClient({ apiKey: mockApiKey }).request("GET", "/api/v1/prompts/greeting");
+
+    expect(String(fetch.mock.calls[0]?.[0])).toBe("http://localhost:8000/api/v1/prompts/greeting");
+  });
+
+  it("adds a missing leading slash to the path", async () => {
+    const fetch = mockFetch({ json: {} });
+
+    await new RouterClient({ apiKey: mockApiKey }).request("GET", "api/v1/prompts/greeting");
+
+    expect(String(fetch.mock.calls[0]?.[0])).toBe(
+      "https://rezunatellm.com/api/v1/prompts/greeting",
+    );
+  });
+
   it("sends the request with the API key and query parameters", async () => {
     const fetch = mockFetch({ json: { ok: true } });
 

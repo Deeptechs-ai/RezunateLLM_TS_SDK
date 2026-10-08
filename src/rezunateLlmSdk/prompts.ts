@@ -15,8 +15,9 @@ export function renderPrompt(
 
   const missing = new Set<string>();
   for (const [, name] of content.matchAll(TEMPLATE_VARIABLE)) {
-    // Object.hasOwn, so built-in names such as "constructor" never count as provided.
-    if (name && !Object.hasOwn(values, name)) {
+    // Object.hasOwn, so built-in names such as "constructor" never count as provided;
+    // an undefined value counts as missing, so a raw placeholder is never sent.
+    if (name && (!Object.hasOwn(values, name) || values[name] === undefined)) {
       missing.add(name);
     }
   }

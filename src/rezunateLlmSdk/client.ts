@@ -47,8 +47,10 @@ export class RouterClient {
   constructor(options: RouterClientOptions = {}) {
     this.apiKey = options.apiKey || process.env[constants.REZUNATE_LLM_API_KEY_ENV] || "";
     this.timeout = options.timeout ?? constants.REZUNATE_LLM_TIMEOUT;
-    this.baseUrl =
-      process.env[constants.REZUNATE_LLM_BASE_URL_ENV] || constants.REZUNATE_LLM_DEFAULT_BASE_URL;
+    // Trailing slashes are removed, so "http://host/" doesn't produce "http://host//api/...".
+    this.baseUrl = (
+      process.env[constants.REZUNATE_LLM_BASE_URL_ENV] || constants.REZUNATE_LLM_DEFAULT_BASE_URL
+    ).replace(/\/+$/, "");
 
     if (!this.apiKey) {
       throw new RouterAPIError(
@@ -63,7 +65,8 @@ export class RouterClient {
     path: string,
     options: RouterRequestOptions = {},
   ): Promise<Response> {
-    const url = new URL(`${this.baseUrl}${path}`);
+    // A missing leading slash is added, so "api/v1/..." can't join onto the host name.
+    const url = new URL(`${this.baseUrl}${path.startsWith("/") ? path : `/${path}`}`);
     for (const [name, value] of Object.entries(options.params ?? {})) {
       if (value !== undefined) {
         url.searchParams.set(name, String(value));

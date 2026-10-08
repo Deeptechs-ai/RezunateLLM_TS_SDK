@@ -27,6 +27,14 @@ describe("renderPrompt", () => {
     expect(renderPrompt("No placeholders here")).toBe("No placeholders here");
   });
 
+  it("treats an undefined value as missing instead of leaving the placeholder", () => {
+    const variables = { name: "Ali", tone: undefined } as unknown as Record<string, string>;
+
+    expect(() => renderPrompt("Hi {{name}} in a {{tone}} tone", variables)).toThrow(
+      "Missing template variables: tone",
+    );
+  });
+
   it("does not treat built-in object names as provided", () => {
     expect(() => renderPrompt("{{constructor}} {{toString}}", {})).toThrow(
       "Missing template variables: constructor, toString",
