@@ -3,7 +3,6 @@
  * Transforms requests and responses between the OpenAI format and DashScope's native format.
  */
 
-import { randomUUID } from "node:crypto";
 import * as constants from "../constants";
 import {
   type ChatCompletionRequest,
@@ -108,23 +107,13 @@ export class QwenProvider extends BaseProvider {
       ];
     }
 
-    const inputTokens = qwenResponse.usage.input_tokens;
-    const outputTokens = qwenResponse.usage.output_tokens;
-    const totalTokens = qwenResponse.usage.total_tokens || inputTokens + outputTokens;
-
-    return {
-      id: qwenResponse.request_id || `chatcmpl-${randomUUID().replaceAll("-", "").slice(0, 8)}`,
-      object: "chat.completion",
-      created: Math.floor(Date.now() / 1000),
-      model: model ?? null,
+    return this.buildResponse({
+      id: qwenResponse.request_id,
+      model,
       choices,
-      usage: {
-        prompt_tokens: inputTokens,
-        completion_tokens: outputTokens,
-        total_tokens: totalTokens,
-      },
-      provider: this.providerName,
-      error: null,
-    };
+      promptTokens: qwenResponse.usage.input_tokens,
+      completionTokens: qwenResponse.usage.output_tokens,
+      totalTokens: qwenResponse.usage.total_tokens,
+    });
   }
 }

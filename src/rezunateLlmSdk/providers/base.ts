@@ -3,9 +3,10 @@
  * All providers inherit from this class.
  */
 
+import { randomUUID } from "node:crypto";
 import type { z } from "zod";
 import * as constants from "../constants";
-import type { ChatCompletionRequest, ChatCompletionResponse, Provider } from "../models";
+import type { ChatCompletionRequest, ChatCompletionResponse, Choice, Provider } from "../models";
 import { getUrl } from "./endpoints";
 
 /** Settings shared by every provider. Times are in seconds, as in the Python SDK. */
@@ -88,6 +89,23 @@ function isTimeoutOrConnectionError(error: unknown): boolean {
 
 function sleep(seconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+}
+
+/** A new OpenAI-style completion id, e.g. `chatcmpl-1a2b3c4d`. */
+export function newCompletionId(): string {
+  return `chatcmpl-${randomUUID().replaceAll("-", "").slice(0, 8)}`;
+}
+
+/** The parts of a response that differ per provider; `buildResponse` fills in the rest. */
+export interface ResponseFields {
+  /** The provider's id; a `chatcmpl-…` id is generated when it is missing. */
+  id?: string | null;
+  model?: string | null;
+  choices: Choice[];
+  promptTokens?: number;
+  completionTokens?: number;
+  /** The provider's total; prompt + completion is used when it is missing or 0. */
+  totalTokens?: number;
 }
 
 /** Number of retries made before a request finally failed, attached to the thrown error. */
@@ -251,6 +269,26 @@ export abstract class BaseProvider {
       return this.responseModel.parse(providerResponseData);
     }
     return providerResponseData;
+  }
+
+  /** Build a successful response in OpenAI format from the provider-specific parts. */
+  protected buildResponse(fields: ResponseFields): ChatCompletionResponse {
+    const promptTokens = fields.promptTokens ?? 0;
+    const completionTokens = fields.completionTokens ?? 0;
+    return {
+      id: fields.id || newCompletionId(),
+      object: "chat.completion",
+      created: Math.floor(Date.now() / 1000),
+      model: fields.model ?? null,
+      choices: fields.choices,
+      usage: {
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: fields.totalTokens || promptTokens + completionTokens,
+      },
+      provider: this.providerName,
+      error: null,
+    };
   }
 
   /** Centralized error handling for all providers. */

@@ -3,7 +3,6 @@
  * Transforms requests and responses between the OpenAI format and Gemini's format.
  */
 
-import { randomUUID } from "node:crypto";
 import * as constants from "../constants";
 import {
   type ChatCompletionRequest,
@@ -125,23 +124,12 @@ export class GoogleProvider extends BaseProvider {
     }
 
     const usageMeta = googleResponse.usageMetadata;
-    const promptTokens = usageMeta.promptTokenCount;
-    const completionTokens = usageMeta.candidatesTokenCount;
-    const totalTokens = usageMeta.totalTokenCount || promptTokens + completionTokens;
-
-    return {
-      id: `chatcmpl-${randomUUID().replaceAll("-", "").slice(0, 8)}`,
-      object: "chat.completion",
-      created: Math.floor(Date.now() / 1000),
-      model: model ?? null,
+    return this.buildResponse({
+      model,
       choices,
-      usage: {
-        prompt_tokens: promptTokens,
-        completion_tokens: completionTokens,
-        total_tokens: totalTokens,
-      },
-      provider: this.providerName,
-      error: null,
-    };
+      promptTokens: usageMeta.promptTokenCount,
+      completionTokens: usageMeta.candidatesTokenCount,
+      totalTokens: usageMeta.totalTokenCount,
+    });
   }
 }
