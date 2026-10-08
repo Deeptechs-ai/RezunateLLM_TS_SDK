@@ -150,6 +150,22 @@ export function deepseekResponse() {
   return { ...openaiResponse(), id: "chatcmpl-deepseek-123", model: "deepseek-chat" };
 }
 
+/** A sample prompt from the Rezunate LLM API (`GET /api/v1/prompts/{slug_id}`). */
+export function promptResponse() {
+  return {
+    slug_id: "customer_support_reply",
+    name: "Customer Support Reply",
+    content: "You support {{company_name}}. Reply to {{customer_name}} in a {{tone}} tone.",
+    description: "Polite support reply",
+    current_version: 2,
+    workspace_id: 17,
+    created_by: 16,
+    input_variables: ["company_name", "customer_name", "tone"],
+    created_at: "2026-05-18T15:28:33.494766Z",
+    updated_at: "2026-06-01T09:00:00Z",
+  };
+}
+
 /** A queued fake HTTP reply: a JSON body and a status code. */
 export interface FakeReply {
   json: unknown;
