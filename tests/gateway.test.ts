@@ -1,7 +1,8 @@
-/** Tests for the gateway, ported from the Feature 1 parts of the Python `tests/test_gateway.py`. */
+/** Tests for the gateway, ported from the Python `tests/test_gateway.py` (no guardrails yet). */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { chatComplete, getAvailableProviders } from "../src/rezunateLlmSdk/gateway";
+import { RouterAPIError } from "../src/rezunateLlmSdk/client";
+import { chatComplete, Gateway, getAvailableProviders } from "../src/rezunateLlmSdk/gateway";
 import {
   anthropicResponse,
   deepseekResponse,
@@ -11,12 +12,14 @@ import {
   mockApiKey,
   mockFetch,
   openaiResponse,
+  promptResponse,
   qwenResponse,
   sampleMessages,
 } from "./fixtures";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 /** The JSON body of the first request sent through the mocked fetch. */
@@ -220,5 +223,141 @@ describe("getAvailableProviders", () => {
 
   it("returns all seven providers", () => {
     expect(getAvailableProviders()).toHaveLength(7);
+  });
+});
+
+describe("Gateway class", () => {
+  const hiRequest = (model: string) => ({ model, messages: sampleMessages() });
+
+  it("initializes with and without defaults", () => {
+    const gateway = new Gateway({ defaultProvider: "openai", defaultApiKey: mockApiKey });
+    expect(gateway.defaultProvider).toBe("openai");
+    expect(gateway.defaultApiKey).toBe(mockApiKey);
+
+    const empty = new Gateway();
+    expect(empty.defaultProvider).toBeNull();
+    expect(empty.defaultApiKey).toBeNull();
+  });
+
+  it("uses the default provider and API key", async () => {
+    mockFetch({ json: openaiResponse() });
+    const gateway = new Gateway({ defaultProvider: "openai", defaultApiKey: mockApiKey });
+
+    const result = await gateway.chatComplete(hiRequest("gpt-4"));
+
+    expect(result.provider).toBe("openai");
+  });
+
+  it("lets a call override the defaults", async () => {
+    mockFetch({ json: anthropicResponse() });
+    const gateway = new Gateway({ defaultProvider: "openai", defaultApiKey: "default-key" });
+
+    const result = await gateway.chatComplete(
+      { ...hiRequest("claude-sonnet-4-20250514"), max_tokens: 100 },
+      { provider: "anthropic", apiKey: mockApiKey },
+    );
+
+    expect(result.provider).toBe("anthropic");
+  });
+
+  it("requires a provider", async () => {
+    await expect(
+      new Gateway({ defaultApiKey: mockApiKey }).chatComplete(hiRequest("gpt-4")),
+    ).rejects.toThrow("Provider must be specified");
+  });
+
+  it("requires an API key", async () => {
+    await expect(
+      new Gateway({ defaultProvider: "openai" }).chatComplete(hiRequest("gpt-4")),
+    ).rejects.toThrow("API key must be specified");
+  });
+
+  it("lists every provider", () => {
+    expect(new Gateway().providers).toEqual(getAvailableProviders());
+  });
+
+  it.each([
+    ["grok", "grok-3-mini", grokResponse],
+    ["qwen", "qwen-plus", qwenResponse],
+  ])("works with %s as the default provider", async (provider, model, response) => {
+    mockFetch({ json: response() });
+    const gateway = new Gateway({ defaultProvider: provider, defaultApiKey: mockApiKey });
+
+    const result = await gateway.chatComplete(hiRequest(model));
+
+    expect(result.provider).toBe(provider);
+    expect(result.choices[0]?.message.content).toBe("Hello! How can I assist you today?");
+  });
+
+  it("passes request settings through", async () => {
+    const fetch = mockFetch({ json: openaiResponse() });
+    const gateway = new Gateway({ defaultProvider: "openai", defaultApiKey: mockApiKey });
+
+    await gateway.chatComplete({ ...hiRequest("gpt-4"), temperature: 0.7, max_tokens: 100 });
+
+    expect(sentBody(fetch)).toMatchObject({ temperature: 0.7, max_tokens: 100 });
+  });
+
+  it("routes one gateway to every provider", async () => {
+    const gateway = new Gateway({ defaultApiKey: mockApiKey });
+    const cases: [string, string, () => unknown][] = [
+      ["openai", "gpt-4", openaiResponse],
+      ["anthropic", "claude-haiku-4-5", anthropicResponse],
+      ["google", "gemini-2.5-flash", googleResponse],
+      ["grok", "grok-3-mini", grokResponse],
+      ["meta", "muse-spark-1.3", metaResponse],
+      ["deepseek", "deepseek-chat", deepseekResponse],
+      ["qwen", "qwen-plus", qwenResponse],
+    ];
+
+    for (const [provider, model, response] of cases) {
+      mockFetch({ json: response() });
+      const result = await gateway.chatComplete(hiRequest(model), { provider });
+      expect(result.provider).toBe(provider);
+    }
+  });
+
+  // New in the TS port: as with chatComplete, a streaming request never throws.
+  it("reports a missing provider as an error chunk when streaming", async () => {
+    const chunks = [];
+    for await (const chunk of new Gateway({ defaultApiKey: mockApiKey }).chatComplete({
+      ...hiRequest("gpt-4"),
+      stream: true,
+    })) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.error).toMatchObject({
+      message: "Provider must be specified",
+      type: "invalid_request_error",
+    });
+  });
+
+  it("fetches a prompt with the Rezunate key and fills in its variables", async () => {
+    const fetch = mockFetch({ json: promptResponse() });
+    const gateway = new Gateway({ rezunateLlmApiKey: "rk_live_test" });
+
+    const text = await gateway.getPrompt(
+      "customer_support_reply",
+      { company_name: "Acme", customer_name: "Ali", tone: "friendly" },
+      2,
+    );
+
+    expect(text).toBe("You support Acme. Reply to Ali in a friendly tone.");
+    const [url, init] = fetch.mock.calls[0] ?? [];
+    expect(String(url)).toBe(
+      "https://rezunatellm.com/api/v1/prompts/customer_support_reply?version=2",
+    );
+    expect(init?.headers).toMatchObject({ "x-api-key": "rk_live_test" });
+  });
+
+  it("creates the Rezunate client only when a prompt is needed", async () => {
+    vi.stubEnv("REZUNATE_LLM_API_KEY", "");
+
+    // Chat-only use needs no Rezunate key.
+    const gateway = new Gateway({ defaultProvider: "openai", defaultApiKey: mockApiKey });
+
+    await expect(gateway.getPrompt("customer_support_reply")).rejects.toThrow(RouterAPIError);
   });
 });

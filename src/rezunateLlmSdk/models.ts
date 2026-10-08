@@ -270,3 +270,21 @@ export const ChatCompletionChunkSchema = z.object({
   error: ErrorInfoSchema.nullable().default(null),
 });
 export type ChatCompletionChunk = z.infer<typeof ChatCompletionChunkSchema>;
+
+// ---- Rezunate LLM API -----------------------------------------------------------------
+
+/** A prompt returned by the Rezunate LLM API. Dates are parsed into `Date` objects. */
+export const PromptResponseSchema = z.object({
+  slug_id: z.string(),
+  name: z.string(),
+  content: z.string(),
+  description: z.string().nullable().default(null),
+  current_version: z.number().int(),
+  workspace_id: z.number().int(),
+  /** The server allows null here (e.g. when the creator was deleted). */
+  created_by: z.number().int().nullable(),
+  input_variables: z.array(z.string()).nullable().default(null),
+  created_at: z.coerce.date(),
+  updated_at: z.coerce.date(),
+});
+export type PromptResponse = z.infer<typeof PromptResponseSchema>;

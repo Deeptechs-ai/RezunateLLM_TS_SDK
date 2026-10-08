@@ -4,7 +4,21 @@
  * using the OpenAI-compatible request/response format.
  */
 
-export { type ChatCompleteOptions, chatComplete, getAvailableProviders } from "./gateway";
+export { getPrompt } from "./api";
+export {
+  RouterAPIError,
+  RouterClient,
+  type RouterClientOptions,
+  type RouterRequestOptions,
+} from "./client";
+export {
+  type ChatCompleteOptions,
+  chatComplete,
+  Gateway,
+  type GatewayChatOptions,
+  type GatewayOptions,
+  getAvailableProviders,
+} from "./gateway";
 export {
   type ChatCompletionChunk,
   ChatCompletionChunkSchema,
@@ -22,6 +36,8 @@ export {
   FunctionDefinitionSchema,
   type Message,
   MessageSchema,
+  type PromptResponse,
+  PromptResponseSchema,
   type Tool,
   type ToolCall,
   type ToolCallDelta,
@@ -33,6 +49,7 @@ export {
   ToolChoiceOptionSchema,
   ToolSchema,
 } from "./models";
+export { renderPrompt } from "./prompts";
 export {
   AnthropicProvider,
   BaseProvider,
