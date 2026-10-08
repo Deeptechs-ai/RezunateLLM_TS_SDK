@@ -14,3 +14,13 @@ export const DEFAULT_MAX_RETRIES = 3;
 export const DEFAULT_RETRY_DELAY = 1.0; // seconds
 export const DEFAULT_TIMEOUT = 60.0; // seconds
 export const RETRYABLE_STATUS_CODES: ReadonlySet<number> = new Set([429, 500, 502, 503, 504]);
+
+// Rezunate LLM API (prompts; guardrails later)
+export const REZUNATE_LLM_DEFAULT_BASE_URL = "https://rezunatellm.com";
+/** Env var that overrides the base URL (e.g. a local server). */
+export const REZUNATE_LLM_BASE_URL_ENV = "REZUNATE_LLM_BASE_URL";
+/** Env var read when no Rezunate API key is passed. */
+export const REZUNATE_LLM_API_KEY_ENV = "REZUNATE_LLM_API_KEY";
+export const REZUNATE_LLM_TIMEOUT = 30; // seconds
+export const REZUNATE_LLM_API_VERSION = "v1";
+export const PROMPT_ENDPOINT = `/api/${REZUNATE_LLM_API_VERSION}/prompts`;
