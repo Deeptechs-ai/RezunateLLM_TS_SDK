@@ -24,6 +24,8 @@ export {
   MessageSchema,
   type Tool,
   type ToolCall,
+  type ToolCallDelta,
+  ToolCallDeltaSchema,
   ToolCallSchema,
   type ToolChoiceFunction,
   ToolChoiceFunctionSchema,

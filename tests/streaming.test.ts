@@ -1114,3 +1114,90 @@ describe("stream error details", () => {
     expect(chunk?.error?.message).toContain('Invalid Anthropic "message_delta" event');
   });
 });
+
+/** Join streamed tool-call pieces by index, the way a caller would. */
+function joinToolCalls(chunks: ChatCompletionChunk[]) {
+  const calls: { id?: string | null; name?: string | null; arguments: string }[] = [];
+  for (const chunk of chunks) {
+    for (const piece of chunk.choices[0]?.delta.tool_calls ?? []) {
+      calls[piece.index] ??= { arguments: "" };
+      const call = calls[piece.index] as {
+        id?: string | null;
+        name?: string | null;
+        arguments: string;
+      };
+      call.id ??= piece.id;
+      call.name ??= piece.function?.name;
+      call.arguments += piece.function?.arguments ?? "";
+    }
+  }
+  return calls;
+}
+
+describe("stream tool calls", () => {
+  it("passes OpenAI's streamed tool-call pieces through", async () => {
+    mockStreamFetch({
+      pieces: [
+        sseData(
+          sdkChunk({
+            role: "assistant",
+            tool_calls: [
+              {
+                index: 0,
+                id: "call_1",
+                type: "function",
+                function: { name: "get_weather", arguments: "" },
+              },
+            ],
+          }),
+          sdkChunk({ tool_calls: [{ index: 0, function: { arguments: '{"city":' } }] }),
+          sdkChunk({ tool_calls: [{ index: 0, function: { arguments: '"Paris"}' } }] }),
+          sdkChunk({}, "tool_calls"),
+        ),
+        DONE,
+      ],
+    });
+
+    const chunks = await collect(streamingProvider("openai").stream(hiRequest("gpt-4")));
+
+    expect(chunks[0]?.choices[0]?.delta.tool_calls).toEqual([
+      {
+        index: 0,
+        id: "call_1",
+        type: "function",
+        function: { name: "get_weather", arguments: "" },
+      },
+    ]);
+    expect(joinToolCalls(chunks)).toEqual([
+      { id: "call_1", name: "get_weather", arguments: '{"city":"Paris"}' },
+    ]);
+    expect(chunks.at(-1)?.choices[0]?.finish_reason).toBe("tool_calls");
+  });
+
+  it("accepts a whole tool call in one chunk without an index (Grok)", async () => {
+    mockStreamFetch({
+      pieces: [
+        sseData(
+          sdkChunk({
+            tool_calls: [
+              {
+                id: "call_9",
+                type: "function",
+                function: { name: "get_weather", arguments: '{"city":"Paris"}' },
+              },
+            ],
+          }),
+          sdkChunk({}, "tool_calls"),
+        ),
+        DONE,
+      ],
+    });
+
+    const chunks = await collect(streamingProvider("grok").stream(hiRequest("grok-3-mini")));
+
+    expect(chunks[0]?.choices[0]?.delta.tool_calls?.[0]?.index).toBe(0);
+    expect(joinToolCalls(chunks)).toEqual([
+      { id: "call_9", name: "get_weather", arguments: '{"city":"Paris"}' },
+    ]);
+  });
+});
