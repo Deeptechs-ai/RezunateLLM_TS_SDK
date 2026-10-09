@@ -2,6 +2,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
+import * as constants from "./constants";
 import {
   GuardrailAction,
   type GuardrailDirection,
@@ -95,4 +96,57 @@ export function checkGuardrails(
   }
 
   return [redacted, violations];
+}
+
+/**
+ * Check a text, print a warning for every violation, and return the redacted text.
+ * Used for inputs, outputs and stream chunks. `block` rules still throw `GuardrailsError`.
+ */
+export function applyGuardrails(
+  text: string,
+  config: GuardrailsConfig,
+  direction: GuardrailDirection,
+): string {
+  const [redacted, violations] = checkGuardrails(text, config, direction);
+  for (const violation of violations) {
+    console.warn(formatViolation(violation));
+  }
+  return redacted;
+}
+
+/** The warning for a violation, in the Python SDK's format (including the matched text). */
+function formatViolation(violation: GuardrailViolation): string {
+  const { action, direction, ruleName, ruleDescription, match } = violation;
+  return (
+    `GUARDRAIL ${action.toUpperCase()} [${direction.toUpperCase()}]: ` +
+    `rule_name='${ruleName}' rule_description='${ruleDescription}' match='${match}'`
+  );
+}
+
+/** Cache for `automaticGuardrails`: undefined until the file has been looked at once. */
+let automaticConfig: GuardrailsConfig | null | undefined;
+
+/**
+ * The guardrails file named by the `GUARDRAILS_FILE_PATH` env var, loaded once.
+ * Null when the variable is unset or the file is missing; an invalid file prints a warning.
+ */
+export function automaticGuardrails(): GuardrailsConfig | null {
+  if (automaticConfig === undefined) {
+    automaticConfig = loadAutomaticGuardrails();
+  }
+  return automaticConfig;
+}
+
+function loadAutomaticGuardrails(): GuardrailsConfig | null {
+  const path = process.env[constants.GUARDRAILS_FILE_PATH_ENV];
+  if (!path || !existsSync(path)) {
+    return null;
+  }
+  try {
+    return loadGuardrails(path);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(`Failed to load automatic guardrails from ${path}: ${reason}`);
+    return null;
+  }
 }
