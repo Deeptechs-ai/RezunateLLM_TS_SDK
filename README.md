@@ -15,8 +15,9 @@ Unified TypeScript SDK for chat completions across multiple AI providers, using 
 | Streaming, with the same retries and error rule for all providers | ✅ Done |
 | Tool calls (all providers, normal chat and streaming) | ✅ Done |
 | Prompts (fetch and render prompts saved on the Rezunate website) | ✅ Done |
-| Guardrails (local rules and server-side PII masking) | ⏳ Planned |
-| `Gateway` class (defaults, prompts and chat; guardrail options come with guardrails) | ✅ Done |
+| Local guardrails (regex rules from a YAML file: block, flag, redact) | ✅ Done |
+| Server guardrails (hosted PII scan and reversible masking) | ⏳ Planned |
+| `Gateway` class (defaults, prompts, chat and local guardrails; server guardrail options come later) | ✅ Done |
 | `rezunate-guard` CLI | ⏳ Planned |
 
 ## Requirements
@@ -281,7 +282,7 @@ await gateway.chatComplete(
 );
 ```
 
-`gateway.chatComplete` works like `chatComplete` (streaming, tool calls, the same error rule). Without a provider or API key it throws `Provider must be specified` / `API key must be specified` (with `stream: true`, these come as an error chunk). The Rezunate client is created on first use, so chat alone needs no Rezunate key. Guardrail options will be added to the Gateway with the guardrails feature.
+`gateway.chatComplete` works like `chatComplete` (streaming, tool calls, the same error rule). Without a provider or API key it throws `Provider must be specified` / `API key must be specified` (with `stream: true`, these come as an error chunk). The Rezunate client is created on first use, so chat alone needs no Rezunate key. Pass `guardrailsConfig` to apply [local guardrails](#local-guardrails) on every call; server guardrail options will come with that feature.
 
 ### Prompts
 
@@ -312,6 +313,82 @@ const reply = await gateway.chatComplete({
 - A failed request throws `RouterAPIError` with the server's message and `statusCode` (for example `Prompt not found`, 404). Prompts follow the "invalid request throws" side of the [error rule](#errors).
 
 The same steps are available on their own: `new RouterClient({ apiKey })`, `getPrompt(client, slugId, version)` and `renderPrompt(content, variables)`.
+
+## Local guardrails
+
+Define rules in a YAML file to **block**, **flag** or **redact** sensitive content (PII or anything custom) in the messages you send and in the model's replies. Everything runs in your app: no Rezunate account is needed and no data leaves your machine.
+
+```yaml
+# guardrails.yaml
+guardrails:
+  - name: block-ssn
+    pattern: '\b\d{3}-\d{2}-\d{4}\b'
+    description: "Block Social Security Numbers"
+    action: block
+
+  - name: redact-email
+    pattern: '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'
+    description: "Redact email addresses"
+    action: redact
+    replacement: "[EMAIL]"
+
+  - name: flag-api-key
+    pattern: '\bsk-[A-Za-z0-9]{20,}\b'
+    description: "Flag leaked API keys"
+    action: flag
+```
+
+Each rule has a `name`, a `pattern` and optionally a `description`, an `action` and a `replacement`. Rules are checked in order.
+
+| `action` | What happens when the pattern matches |
+|---|---|
+| `block` (default) | Throws `GuardrailsError` (`Guardrail 'block-ssn' triggered on INPUT: …`) |
+| `redact` | Replaces every match with `replacement` (default `[REDACTED]`) |
+| `flag` | Lets the text through unchanged and prints a warning |
+
+**`pattern` is a JavaScript regular expression.** Common patterns, like the ones above, are the same as in Python. `loadGuardrails` checks every pattern when the file is loaded and throws `Invalid regex in rule '…'` for one that isn't valid.
+
+Use the rules in one of two ways:
+
+```ts
+import { Gateway, loadGuardrails } from "rezunate-llm-sdk";
+
+const guardrailsConfig = loadGuardrails("guardrails.yaml");
+
+// For every call of a gateway (or pass `guardrailsConfig` to a single chatComplete call):
+const guarded = new Gateway({
+  defaultProvider: "openai",
+  defaultApiKey: process.env.OPENAI_API_KEY,
+  guardrailsConfig,
+});
+await guarded.chatComplete({ model: "gpt-4o-mini", messages });
+```
+
+Or set the `GUARDRAILS_FILE_PATH` environment variable to the file's path: it's loaded once and applied to every call that doesn't pass its own `guardrailsConfig`. If the file can't be loaded, a warning is printed and no rules are applied.
+
+How the rules are applied:
+
+- **Messages you send:** every message is checked before the request. `redact` changes the text that is sent, and also your own `messages` objects, as in the Python SDK (so they hold `[EMAIL]` afterwards).
+- **Replies:** every choice is checked. `redact` replaces the text in the reply; `block` throws.
+- **Streams:** each chunk is checked. A `block` rule ends the stream with an error chunk (`error.type: "guardrail_error"`), like every other stream problem. `flag` and `redact` only print a warning and chunks pass unchanged, because a match can be split across chunks.
+- **Warnings:** violations are printed with `console.warn`, in the Python SDK's format, including the matched text: `GUARDRAIL FLAG [OUTPUT]: rule_name='flag-api-key' rule_description='…' match='sk-…'`.
+
+You can also check a text yourself. `checkGuardrails` returns `[redactedText, violations]` and throws `GuardrailsError` for a `block` rule:
+
+```ts
+import { checkGuardrails, GuardrailsError, loadGuardrails } from "rezunate-llm-sdk";
+
+const config = loadGuardrails("guardrails.yaml");
+try {
+  const [redacted, violations] = checkGuardrails("Email me at alex@example.com", config, "output");
+  console.log(redacted); // "Email me at [EMAIL]"
+  console.log(violations); // the rules that matched
+} catch (error) {
+  if (error instanceof GuardrailsError) {
+    console.log(`Blocked by '${error.ruleName}' on ${error.direction}`);
+  }
+}
+```
 
 ## Try it locally (for testers)
 
@@ -366,6 +443,7 @@ src/
     ├── client.ts            # RouterClient for the Rezunate LLM API
     ├── api.ts               # Rezunate LLM API endpoints (getPrompt)
     ├── prompts.ts           # renderPrompt()
+    ├── guardrails.ts        # loadGuardrails() and checkGuardrails() (local guardrails)
     ├── models.ts            # request/response models (zod)
     ├── constants.ts
     ├── providers/           # one file per provider, plus base, factory and endpoints
@@ -396,6 +474,7 @@ The TypeScript SDK is meant to behave like the Python SDK. These differences are
 15. **Gemini gets parallel tool results together.** When the model calls several tools at once, Gemini needs all their results in one message. The TS SDK groups `tool` messages that follow each other into one message; the Python SDK sends one message per result, which Gemini rejects.
 16. **Gemini accepts full JSON Schema for tools.** The TS SDK sends a tool's schema to Gemini as `parametersJsonSchema`, so keywords such as `additionalProperties` (required by OpenAI's strict mode) and `$ref` work. The Python SDK uses Gemini's older `parameters` field, which rejects them with a 400 error.
 17. **Tool calls work in streams.** With `stream: true`, tool calls arrive as pieces in `delta.tool_calls` (OpenAI's format) for every provider, and Gemini ends with `finish_reason: "tool_calls"`. In the Python SDK, stream chunks carry only text, so the tool call is lost (Gemini even ends with `"stop"`).
+18. **A guardrail block in a stream comes as an error chunk.** With `stream: true`, a `block` rule ends the stream with one error chunk (`error.type: "guardrail_error"`), like every other stream problem. The Python SDK raises `GuardrailsError` in the middle of the stream. Without `stream`, both throw `GuardrailsError`.
 
 ## Known limitations
 
