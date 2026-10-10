@@ -31,7 +31,7 @@ export interface ChatCompleteOptions {
    * Guardrail rules checked on the messages and the reply. Without it, the file named by the
    * `GUARDRAILS_FILE_PATH` env var is used, if any.
    */
-  guardrailsConfig?: GuardrailsConfig | null;
+  guardrailsConfig?: GuardrailsConfig;
 }
 
 /**
@@ -253,7 +253,7 @@ export class Gateway {
       );
       return request?.stream === true ? errorStream(error, request.model) : Promise.reject(error);
     }
-    const guardrailsConfig = options.guardrailsConfig ?? this.guardrailsConfig;
+    const guardrailsConfig = options.guardrailsConfig ?? this.guardrailsConfig ?? undefined;
     return chatComplete({ ...options, provider, apiKey, request, guardrailsConfig });
   }
 

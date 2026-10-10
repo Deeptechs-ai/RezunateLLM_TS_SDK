@@ -343,10 +343,13 @@ Each rule has a `name`, a `pattern` and optionally a `description`, an `action` 
 | `action` | What happens when the pattern matches |
 |---|---|
 | `block` (default) | Throws `GuardrailsError` (`Guardrail 'block-ssn' triggered on INPUT: …`) |
-| `redact` | Replaces every match with `replacement` (default `[REDACTED]`) |
+| `redact` | Replaces every match with `replacement` (default `[REDACTED]`). **In streamed replies it only warns, so the matched text still reaches the user; use `block` to stop it in streams.** |
 | `flag` | Lets the text through unchanged and prints a warning |
 
-**`pattern` is a JavaScript regular expression.** Common patterns, like the ones above, are the same as in Python. `loadGuardrails` checks every pattern when the file is loaded and throws `Invalid regex in rule '…'` for one that isn't valid.
+**`pattern` is a JavaScript regular expression.** Common patterns, like the ones above, are the same as in Python. `loadGuardrails` checks every pattern when the file is loaded and throws `Invalid regex in rule '…'` for one that isn't valid. A few tips:
+
+- JavaScript has no inline flags such as Python's `(?i)`; for case-insensitive matching use classes such as `[Ss][Ss][Nn]`.
+- Patterns run on every message, so avoid ones that can backtrack badly (for example `(a+)+`), and never leave a pattern empty: it matches everything.
 
 Use the rules in one of two ways:
 
@@ -370,7 +373,9 @@ How the rules are applied:
 
 - **Messages you send:** every message is checked before the request. `redact` changes the text that is sent, and also your own `messages` objects, as in the Python SDK (so they hold `[EMAIL]` afterwards).
 - **Replies:** every choice is checked. `redact` replaces the text in the reply; `block` throws.
-- **Streams:** each chunk is checked. A `block` rule ends the stream with an error chunk (`error.type: "guardrail_error"`), like every other stream problem. `flag` and `redact` only print a warning and chunks pass unchanged, because a match can be split across chunks.
+- **Streams:** each chunk is checked. A `block` rule ends the stream with an error chunk (`error.type: "guardrail_error"`), like every other stream problem; the text streamed before it has already reached the user. `flag` and `redact` only print a warning and chunks pass unchanged, because a match can be split across chunks.
+- **Rule order:** every rule is matched against the original text, so a `block` rule still fires on text that an earlier `redact` rule replaced.
+- **What is checked:** the text of messages and replies. Tool-call arguments are not checked.
 - **Warnings:** violations are printed with `console.warn`, in the Python SDK's format, including the matched text: `GUARDRAIL FLAG [OUTPUT]: rule_name='flag-api-key' rule_description='…' match='sk-…'`.
 
 You can also check a text yourself. `checkGuardrails` returns `[redactedText, violations]` and throws `GuardrailsError` for a `block` rule:
