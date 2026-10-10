@@ -11,6 +11,9 @@ importers:
       openai:
         specifier: ^7.23.0
         version: 7.23.0(zod@4.6.5)
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -1768,7 +1771,6 @@ snapshots:
 
   why-is-node-running@3.2.2: {}
 
-  yaml@2.9.1:
-    optional: true
+  yaml@2.9.1: {}
 
   zod@4.6.5: {}

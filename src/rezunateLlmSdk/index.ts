@@ -19,6 +19,7 @@ export {
   type GatewayOptions,
   getAvailableProviders,
 } from "./gateway";
+export { checkGuardrails, GuardrailsError, loadGuardrails } from "./guardrails";
 export {
   type ChatCompletionChunk,
   ChatCompletionChunkSchema,
@@ -34,6 +35,13 @@ export {
   FunctionCallSchema,
   type FunctionDefinition,
   FunctionDefinitionSchema,
+  GuardrailAction,
+  GuardrailDirection,
+  type GuardrailRule,
+  GuardrailRuleSchema,
+  type GuardrailsConfig,
+  GuardrailsConfigSchema,
+  type GuardrailViolation,
   type Message,
   MessageSchema,
   type PromptResponse,
