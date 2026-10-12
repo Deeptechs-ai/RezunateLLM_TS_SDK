@@ -326,6 +326,31 @@ export const GuardrailsConfigSchema = z.object({
 });
 export type GuardrailsConfig = z.infer<typeof GuardrailsConfigSchema>;
 
+/** Which sides the hosted PII scan runs on. Without `directions`, both input and output. */
+export interface ServerGuardrailsConfig {
+  directions?: readonly GuardrailDirection[];
+}
+
+/** A PII entity found by the hosted scan; `start`/`end` are character positions. */
+export const DetectedEntitySchema = z.object({
+  text: z.string(),
+  label: z.string(),
+  score: z.number(),
+  start: z.number().int(),
+  end: z.number().int(),
+});
+export type DetectedEntity = z.infer<typeof DetectedEntitySchema>;
+
+/** The result of a hosted PII scan. */
+export const ScanResponseSchema = z.object({
+  entities: z.array(DetectedEntitySchema),
+  action: z.string(),
+  blocked: z.boolean(),
+  /** The text after the workspace's action (e.g. with PII redacted). */
+  text: z.string(),
+});
+export type ScanResponse = z.infer<typeof ScanResponseSchema>;
+
 /** A rule that matched a text. */
 export interface GuardrailViolation {
   ruleName: string;

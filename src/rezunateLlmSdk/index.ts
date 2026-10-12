@@ -4,7 +4,7 @@
  * using the OpenAI-compatible request/response format.
  */
 
-export { getPrompt } from "./api";
+export { getPrompt, scanText } from "./api";
 export {
   RouterAPIError,
   RouterClient,
@@ -17,9 +17,15 @@ export {
   Gateway,
   type GatewayChatOptions,
   type GatewayOptions,
+  type GuardrailsResource,
   getAvailableProviders,
 } from "./gateway";
-export { checkGuardrails, GuardrailsError, loadGuardrails } from "./guardrails";
+export {
+  checkGuardrails,
+  GuardrailsError,
+  loadGuardrails,
+  ServerGuardrailsError,
+} from "./guardrails";
 export { type MaskSpan, MaskVault, unmask } from "./masking";
 export {
   type ChatCompletionChunk,
@@ -32,6 +38,8 @@ export {
   ChoiceChunkSchema,
   type ChoiceDelta,
   ChoiceDeltaSchema,
+  type DetectedEntity,
+  DetectedEntitySchema,
   type FunctionCall,
   FunctionCallSchema,
   type FunctionDefinition,
@@ -47,6 +55,9 @@ export {
   MessageSchema,
   type PromptResponse,
   PromptResponseSchema,
+  type ScanResponse,
+  ScanResponseSchema,
+  type ServerGuardrailsConfig,
   type Tool,
   type ToolCall,
   type ToolCallDelta,

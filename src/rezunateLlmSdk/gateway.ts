@@ -1,8 +1,13 @@
 /** Gateway - routes chat completion requests to providers. */
 
-import { getPrompt as fetchPrompt } from "./api";
-import { RouterClient } from "./client";
-import { applyGuardrails, automaticGuardrails, GuardrailsError } from "./guardrails";
+import { getPrompt as fetchPrompt, scanText } from "./api";
+import { RouterAPIError, RouterClient } from "./client";
+import {
+  applyGuardrails,
+  automaticGuardrails,
+  GuardrailsError,
+  ServerGuardrailsError,
+} from "./guardrails";
 import {
   type ChatCompletionChunk,
   type ChatCompletionRequest,
@@ -11,6 +16,8 @@ import {
   GuardrailDirection,
   type GuardrailsConfig,
   type Provider,
+  type ScanResponse,
+  type ServerGuardrailsConfig,
 } from "./models";
 import { renderPrompt } from "./prompts";
 import { getProvider, listProviders } from "./providers";
@@ -150,19 +157,31 @@ function guardOutput(response: ChatCompletionResponse, config: GuardrailsConfig)
 
 /**
  * A stream that ends with one error chunk, so a streaming request never throws.
- * A guardrail block gets the type "guardrail_error"; anything else is an invalid request.
+ * Guardrail blocks get the type "guardrail_error", a failed Rezunate API call "api_error"
+ * (with its status code), and anything else "invalid_request_error".
  */
 async function* errorStream(
   error: unknown,
   model: unknown,
   provider: Provider | null = null,
 ): AsyncGenerator<ChatCompletionChunk> {
-  yield makeErrorChunk(
+  const chunk = makeErrorChunk(
     error,
     typeof model === "string" ? model : null,
     provider,
-    error instanceof GuardrailsError ? "guardrail_error" : "invalid_request_error",
+    errorType(error),
   );
+  if (error instanceof RouterAPIError && chunk.error) {
+    chunk.error.code = error.statusCode;
+  }
+  yield chunk;
+}
+
+function errorType(error: unknown): string {
+  if (error instanceof GuardrailsError || error instanceof ServerGuardrailsError) {
+    return "guardrail_error";
+  }
+  return error instanceof RouterAPIError ? "api_error" : "invalid_request_error";
 }
 
 function createProvider(options: ChatCompleteOptions, request: ChatCompletionRequest) {
@@ -179,29 +198,49 @@ export function getAvailableProviders(): string[] {
   return listProviders();
 }
 
-/** Settings a `Gateway` remembers. Server guardrail options will come with that feature. */
+/** Settings a `Gateway` remembers. */
 export interface GatewayOptions {
   /** Provider used when a call doesn't name one. */
   defaultProvider?: string;
   /** Provider API key used when a call doesn't pass one. */
   defaultApiKey?: string;
-  /** API key for the Rezunate LLM API (prompts); defaults to the `REZUNATE_LLM_API_KEY` env var. */
+  /**
+   * API key for the Rezunate LLM API (prompts and the hosted PII scan); defaults to the
+   * `REZUNATE_LLM_API_KEY` env var.
+   */
   rezunateLlmApiKey?: string;
   /** Guardrail rules checked on every call, unless a call passes its own. */
   guardrailsConfig?: GuardrailsConfig;
+  /**
+   * Scan with the hosted PII service: `true` scans input and output, a config picks the sides.
+   * Off by default.
+   */
+  serverGuardrails?: boolean | ServerGuardrailsConfig;
 }
 
 /** Per-call options for `Gateway.chatComplete`; anything left out uses the gateway's defaults. */
-export type GatewayChatOptions = Partial<Omit<ChatCompleteOptions, "request">>;
+export type GatewayChatOptions = Partial<Omit<ChatCompleteOptions, "request">> & {
+  serverGuardrails?: boolean | ServerGuardrailsConfig;
+};
+
+/** Hosted PII detection, available as `gateway.guardrails`. */
+export interface GuardrailsResource {
+  /** Scan a text with the workspace's guardrail settings. Throws `RouterAPIError` on failure. */
+  scan(text: string): Promise<ScanResponse>;
+}
+
+const BOTH_DIRECTIONS = [GuardrailDirection.INPUT, GuardrailDirection.OUTPUT] as const;
 
 /**
- * One object that remembers your settings: the default provider and its key for chat, and the
- * Rezunate LLM API key for prompts.
+ * One object that remembers your settings: the default provider and its key for chat, the
+ * Rezunate LLM API key for prompts and the hosted PII scan, and the guardrails to apply.
  */
 export class Gateway {
   readonly defaultProvider: string | null;
   readonly defaultApiKey: string | null;
   readonly guardrailsConfig: GuardrailsConfig | null;
+  readonly serverGuardrails: boolean | ServerGuardrailsConfig;
+  readonly guardrails: GuardrailsResource;
   private readonly rezunateLlmApiKey: string | null;
   private cachedClient: RouterClient | null = null;
 
@@ -209,7 +248,9 @@ export class Gateway {
     this.defaultProvider = options.defaultProvider ?? null;
     this.defaultApiKey = options.defaultApiKey ?? null;
     this.guardrailsConfig = options.guardrailsConfig ?? null;
+    this.serverGuardrails = options.serverGuardrails ?? false;
     this.rezunateLlmApiKey = options.rezunateLlmApiKey ?? null;
+    this.guardrails = { scan: (text) => scanText(this.client, text) };
   }
 
   /** The Rezunate LLM API client, created on first use, so chat alone needs no Rezunate key. */
@@ -227,6 +268,7 @@ export class Gateway {
 
   /**
    * Execute a chat completion, using the gateway's defaults for anything not passed.
+   * With server guardrails on, messages and/or the reply are scanned by the hosted PII service.
    * Errors follow `chatComplete`: with `stream: true`, every problem comes as an error chunk.
    */
   chatComplete(
@@ -245,16 +287,92 @@ export class Gateway {
     request: ChatCompletionRequest,
     options: GatewayChatOptions = {},
   ): Promise<ChatCompletionResponse> | AsyncIterable<ChatCompletionChunk> {
-    const provider = options.provider || this.defaultProvider;
-    const apiKey = options.apiKey || this.defaultApiKey;
+    const { serverGuardrails, ...callOptions } = options;
+    const provider = callOptions.provider || this.defaultProvider;
+    const apiKey = callOptions.apiKey || this.defaultApiKey;
     if (!provider || !apiKey) {
       const error = new Error(
         provider ? "API key must be specified" : "Provider must be specified",
       );
       return request?.stream === true ? errorStream(error, request.model) : Promise.reject(error);
     }
-    const guardrailsConfig = options.guardrailsConfig ?? this.guardrailsConfig ?? undefined;
-    return chatComplete({ ...options, provider, apiKey, request, guardrailsConfig });
+
+    const chatOptions: ChatCompleteOptions = {
+      ...callOptions,
+      provider,
+      apiKey,
+      request,
+      guardrailsConfig: callOptions.guardrailsConfig ?? this.guardrailsConfig ?? undefined,
+    };
+    const scan = this.serverScanDirections(serverGuardrails);
+    return request?.stream === true
+      ? this.streamWithServerScan(chatOptions, scan)
+      : this.completeWithServerScan(chatOptions, scan);
+  }
+
+  private async completeWithServerScan(
+    options: ChatCompleteOptions,
+    scan: ReadonlySet<GuardrailDirection>,
+  ): Promise<ChatCompletionResponse> {
+    if (scan.has(GuardrailDirection.INPUT)) {
+      await this.scanMessages(options.request);
+    }
+    const response = await complete(options);
+    if (scan.has(GuardrailDirection.OUTPUT)) {
+      for (const choice of response.choices) {
+        if (choice.message.content) {
+          choice.message.content = await this.serverScan(
+            choice.message.content,
+            GuardrailDirection.OUTPUT,
+          );
+        }
+      }
+    }
+    return response;
+  }
+
+  private async *streamWithServerScan(
+    options: ChatCompleteOptions,
+    scan: ReadonlySet<GuardrailDirection>,
+  ): AsyncGenerator<ChatCompletionChunk> {
+    if (scan.has(GuardrailDirection.INPUT)) {
+      try {
+        await this.scanMessages(options.request);
+      } catch (error) {
+        yield* errorStream(error, options.request.model);
+        return;
+      }
+    }
+    yield* streamChat(options);
+  }
+
+  /** The sides to scan on a call: `true` means both, a config picks them, off means none. */
+  private serverScanDirections(
+    callSetting: boolean | ServerGuardrailsConfig | undefined,
+  ): ReadonlySet<GuardrailDirection> {
+    const setting = callSetting ?? this.serverGuardrails;
+    if (!setting) {
+      return new Set();
+    }
+    return new Set(setting === true ? BOTH_DIRECTIONS : (setting.directions ?? BOTH_DIRECTIONS));
+  }
+
+  /** Scan every message before it's sent; redacted text is written into it, as in Python. */
+  private async scanMessages(request: ChatCompletionRequest): Promise<void> {
+    for (const message of request.messages) {
+      if (message.content) {
+        message.content = await this.serverScan(message.content, GuardrailDirection.INPUT);
+      }
+    }
+  }
+
+  /** Scan one text with the hosted service: throws if it's blocked, else returns the result. */
+  private async serverScan(text: string, direction: GuardrailDirection): Promise<string> {
+    const result = await this.guardrails.scan(text);
+    if (result.blocked) {
+      throw new ServerGuardrailsError(direction, result.entities, result.action);
+    }
+    return result.text && result.text !== text ? result.text : text;
   }
 
   /**

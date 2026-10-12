@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import * as constants from "./constants";
 import {
+  type DetectedEntity,
   GuardrailAction,
   type GuardrailDirection,
   type GuardrailsConfig,
@@ -23,6 +24,23 @@ export class GuardrailsError extends Error {
     this.ruleName = ruleName;
     this.ruleDescription = ruleDescription;
     this.direction = direction;
+  }
+}
+
+/** Raised when the hosted PII scan blocks a text. */
+export class ServerGuardrailsError extends Error {
+  readonly direction: GuardrailDirection;
+  readonly entities: DetectedEntity[];
+  /** The action the server returned (e.g. "block"). */
+  readonly action: string;
+
+  constructor(direction: GuardrailDirection, entities: DetectedEntity[], action: string) {
+    const labels = [...new Set(entities.map((entity) => entity.label))].sort().join(", ") || "PII";
+    super(`Server guardrail blocked ${direction.toUpperCase()}: detected ${labels}`);
+    this.name = "ServerGuardrailsError";
+    this.direction = direction;
+    this.entities = entities;
+    this.action = action;
   }
 }
 

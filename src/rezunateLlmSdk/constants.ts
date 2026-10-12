@@ -24,6 +24,9 @@ export const REZUNATE_LLM_API_KEY_ENV = "REZUNATE_LLM_API_KEY";
 export const REZUNATE_LLM_TIMEOUT = 30; // seconds
 export const REZUNATE_LLM_API_VERSION = "v1";
 export const PROMPT_ENDPOINT = `/api/${REZUNATE_LLM_API_VERSION}/prompts`;
+export const GUARDRAILS_SCAN_ENDPOINT = `/api/${REZUNATE_LLM_API_VERSION}/guardrails/scan`;
+/** Scans can take a while when the PII detection service starts up. */
+export const GUARDRAILS_SCAN_TIMEOUT = 180; // seconds
 
 // Local guardrails
 /** Env var with the path of a guardrails YAML file that is loaded automatically. */
