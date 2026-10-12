@@ -20,6 +20,7 @@ export {
   getAvailableProviders,
 } from "./gateway";
 export { checkGuardrails, GuardrailsError, loadGuardrails } from "./guardrails";
+export { type MaskSpan, MaskVault, unmask } from "./masking";
 export {
   type ChatCompletionChunk,
   ChatCompletionChunkSchema,

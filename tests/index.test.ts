@@ -26,6 +26,7 @@ describe("package entry point", () => {
         "MetaProvider",
         "FunctionCallSchema",
         "FunctionDefinitionSchema",
+        "MaskVault",
         "MessageSchema",
         "PromptResponseSchema",
         "RouterAPIError",
@@ -45,6 +46,7 @@ describe("package entry point", () => {
         "listProviders",
         "loadGuardrails",
         "renderPrompt",
+        "unmask",
       ].sort(),
     );
   });
