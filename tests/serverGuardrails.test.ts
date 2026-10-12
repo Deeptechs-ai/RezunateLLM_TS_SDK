@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Gateway, type GatewayOptions } from "../src/rezunateLlmSdk/gateway";
 import { ServerGuardrailsError } from "../src/rezunateLlmSdk/guardrails";
 import { type ChatCompletionChunk, GuardrailsConfigSchema } from "../src/rezunateLlmSdk/models";
-import { anthropicResponse, mockFetch } from "./fixtures";
+import { anthropicResponse, mockFetch, sseData } from "./fixtures";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -204,5 +204,127 @@ describe("the scan request", () => {
       type: "guardrail_error",
       message: "Server guardrail blocked INPUT: detected US_SSN",
     });
+  });
+});
+
+// New in the TS port: the Python SDK has no tests for scanning streamed replies.
+describe("server scan of streamed replies", () => {
+  /** One streamed chunk in the OpenAI format. */
+  const piece = (delta: object, finishReason: string | null = null, extra: object = {}) => ({
+    id: "chatcmpl-1",
+    object: "chat.completion.chunk",
+    created: 1700000000,
+    model: "gpt-4",
+    choices: [{ index: 0, delta, finish_reason: finishReason }],
+    ...extra,
+  });
+
+  /**
+   * A fetch that streams `chunks` from the provider and answers every scan with `scan(text)`.
+   * Returns the texts that were scanned.
+   */
+  function routedFetch(chunks: object[], scan: (text: string) => object): string[] {
+    const scanned: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        if (String(url) === SCAN_URL) {
+          const { text } = JSON.parse(String(init?.body));
+          scanned.push(text);
+          return new Response(JSON.stringify(scan(text)), { status: 200 });
+        }
+        return new Response(`${sseData(...chunks)}data: [DONE]\n\n`, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }),
+    );
+    return scanned;
+  }
+
+  /** A scan service that redacts email addresses. */
+  const redactEmails = (text: string) => ({
+    entities: [],
+    action: "redact",
+    blocked: false,
+    text: text.replace(/\S+@\S+\.\w+/g, "[EMAIL]"),
+  });
+
+  async function streamWithOutputScan() {
+    const gw = new Gateway({
+      defaultProvider: "openai",
+      defaultApiKey: "openai-key",
+      guardrailsConfig: NO_LOCAL_RULES,
+      serverGuardrails: OUTPUT_ONLY,
+      rezunateLlmApiKey: ROUTER_KEY,
+    });
+    const chunks: ChatCompletionChunk[] = [];
+    for await (const chunk of gw.chatComplete({
+      model: "gpt-4",
+      messages: [{ role: "user", content: "Hi" }],
+      stream: true,
+    })) {
+      chunks.push(chunk);
+    }
+    return chunks;
+  }
+
+  it("scans a few sentences at a time and keeps the finish and usage chunks in order", async () => {
+    const long = "x".repeat(190);
+    const usage = { prompt_tokens: 5, completion_tokens: 9, total_tokens: 14 };
+    const scanned = routedFetch(
+      [
+        piece({ role: "assistant", content: "" }),
+        piece({ content: `${long}. Mail ` }),
+        piece({ content: "jo@a.co now." }),
+        piece({ content: " Bye" }),
+        piece({}, "stop"),
+        { ...piece({}), choices: [], usage },
+      ],
+      redactEmails,
+    );
+
+    const chunks = await streamWithOutputScan();
+
+    // The first scan waits for 200 characters and a sentence end; the rest goes at the finish.
+    expect(scanned).toEqual([`${long}. Mail jo@a.co now.`, " Bye"]);
+    const text = chunks.map((c) => c.choices[0]?.delta.content ?? "").join("");
+    expect(text).toBe(`${long}. Mail [EMAIL] now. Bye`);
+    expect(chunks.at(-2)?.choices[0]?.finish_reason).toBe("stop");
+    expect(chunks.at(-1)?.usage).toEqual(usage);
+  });
+
+  it("ends the stream with an error chunk when a scanned sentence is blocked", async () => {
+    routedFetch(
+      [
+        piece({ content: "All good so far." }),
+        piece({ content: " SSN 123-45-6789." }),
+        piece({}, "stop"),
+      ],
+      (text) => ({ entities: [], action: "block", blocked: text.includes("SSN"), text }),
+    );
+
+    const chunks = await streamWithOutputScan();
+
+    expect(chunks.at(-1)?.error).toMatchObject({
+      type: "guardrail_error",
+      message: "Server guardrail blocked OUTPUT: detected PII",
+    });
+    expect(chunks.some((c) => c.choices[0]?.finish_reason === "stop")).toBe(false);
+  });
+
+  it("passes tool-call pieces through", async () => {
+    const toolCall = {
+      index: 0,
+      id: "call_1",
+      type: "function",
+      function: { name: "get_weather", arguments: '{"city":"Paris"}' },
+    };
+    routedFetch([piece({ tool_calls: [toolCall] }), piece({}, "tool_calls")], redactEmails);
+
+    const chunks = await streamWithOutputScan();
+
+    expect(chunks[0]?.choices[0]?.delta.tool_calls).toEqual([toolCall]);
+    expect(chunks.at(-1)?.choices[0]?.finish_reason).toBe("tool_calls");
   });
 });

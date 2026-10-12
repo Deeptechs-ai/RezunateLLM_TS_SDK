@@ -2,6 +2,7 @@
 
 import { getPrompt as fetchPrompt, scanText } from "./api";
 import { RouterAPIError, RouterClient } from "./client";
+import * as constants from "./constants";
 import {
   applyGuardrails,
   automaticGuardrails,
@@ -211,19 +212,75 @@ async function* restoreStream(
 
   // Anything still held back goes out as one last text chunk.
   if (carry && template) {
-    yield {
-      ...template,
-      usage: null,
-      choices: [
-        {
-          index: template.choices[0]?.index ?? 0,
-          delta: { role: null, content: vault.restore(carry) },
-          finish_reason: null,
-          provider_finish_reason: null,
-        },
-      ],
-    };
+    yield textChunk(vault.restore(carry), template);
   }
+}
+
+/** A chunk carrying only `text`, with the id, model and provider of `template`. */
+function textChunk(text: string, template: ChatCompletionChunk | null): ChatCompletionChunk {
+  return {
+    id: template?.id ?? null,
+    object: "chat.completion.chunk",
+    created: template?.created ?? Math.floor(Date.now() / 1000),
+    model: template?.model ?? null,
+    choices: [
+      {
+        index: template?.choices[0]?.index ?? 0,
+        delta: { role: null, content: text },
+        finish_reason: null,
+        provider_finish_reason: null,
+      },
+    ],
+    usage: null,
+    provider: template?.provider ?? null,
+    error: null,
+  };
+}
+
+/** The chunk with its text removed (the text was collected and is sent separately). */
+function withoutText(chunk: ChatCompletionChunk): ChatCompletionChunk {
+  return {
+    ...chunk,
+    choices: chunk.choices.map((choice) => ({
+      ...choice,
+      delta: { ...choice.delta, content: null },
+    })),
+  };
+}
+
+/**
+ * Whether a chunk carries more than text and must be passed on: a role, a finish reason,
+ * usage, an error, or tool-call pieces (which the Python SDK's streams don't have).
+ */
+function hasSignal(chunk: ChatCompletionChunk): boolean {
+  if (chunk.choices.length === 0 || chunk.error !== null) {
+    return true;
+  }
+  return chunk.choices.some(
+    (choice) =>
+      choice.finish_reason !== null ||
+      choice.delta.role !== null ||
+      (choice.delta.tool_calls?.length ?? 0) > 0,
+  );
+}
+
+/**
+ * Split collected text into the part to scan now and the part to keep: at the last sentence
+ * end, else at the last space, else all of it.
+ */
+function splitForScan(text: string): [string, string] {
+  let lastEnd = -1;
+  for (const match of text.matchAll(new RegExp(constants.STREAM_SENTENCE_END, "g"))) {
+    lastEnd = match.index + match[0].length;
+  }
+  if (lastEnd !== -1) {
+    return [text.slice(0, lastEnd), text.slice(lastEnd)];
+  }
+  const cut = text.lastIndexOf(" ");
+  if (cut > 0) {
+    return [text.slice(0, cut + 1), text.slice(cut + 1)];
+  }
+  return [text, ""];
 }
 
 function errorType(error: unknown): string {
@@ -423,8 +480,63 @@ export class Gateway {
         return;
       }
     }
-    const chunks = streamChat(options);
+    let chunks: AsyncIterable<ChatCompletionChunk> = streamChat(options);
+    if (call.scan.has(GuardrailDirection.OUTPUT)) {
+      chunks = this.scanStream(chunks);
+    }
     yield* call.vault && call.rehydrate ? restoreStream(chunks, call.vault) : chunks;
+  }
+
+  /**
+   * Scan a streamed reply with the hosted service. Text is collected and scanned a few
+   * sentences at a time, so PII split across chunks is still found; other chunks (role,
+   * finish, usage, tool calls, errors) keep their place. A block ends with an error chunk.
+   */
+  private async *scanStream(
+    chunks: AsyncIterable<ChatCompletionChunk>,
+  ): AsyncGenerator<ChatCompletionChunk> {
+    let buffer = "";
+    let template: ChatCompletionChunk | null = null;
+    const scanned = async (text: string) =>
+      textChunk(await this.serverScan(text, GuardrailDirection.OUTPUT), template);
+
+    try {
+      for await (const chunk of chunks) {
+        if (chunk.choices.length > 0) {
+          template ??= chunk;
+        }
+
+        const content = chunk.choices.map((choice) => choice.delta.content ?? "").join("");
+        if (content) {
+          buffer += content;
+          if (
+            (buffer.length >= constants.STREAM_SCAN_MIN_CHARS &&
+              constants.STREAM_SENTENCE_END.test(buffer)) ||
+            buffer.length >= constants.STREAM_SCAN_MAX_CHARS
+          ) {
+            const [head, rest] = splitForScan(buffer);
+            buffer = rest;
+            if (head) {
+              yield await scanned(head);
+            }
+          }
+        }
+
+        // Send the collected text first, so the stream keeps its order.
+        if (hasSignal(chunk)) {
+          if (buffer) {
+            yield await scanned(buffer);
+            buffer = "";
+          }
+          yield withoutText(chunk);
+        }
+      }
+      if (buffer) {
+        yield await scanned(buffer);
+      }
+    } catch (error) {
+      yield* errorStream(error, template?.model, template?.provider ?? null);
+    }
   }
 
   /** The sides to scan on a call: `true` means both, a config picks them, off means none. */

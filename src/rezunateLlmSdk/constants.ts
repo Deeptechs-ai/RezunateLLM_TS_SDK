@@ -27,6 +27,12 @@ export const PROMPT_ENDPOINT = `/api/${REZUNATE_LLM_API_VERSION}/prompts`;
 export const GUARDRAILS_SCAN_ENDPOINT = `/api/${REZUNATE_LLM_API_VERSION}/guardrails/scan`;
 /** Scans can take a while when the PII detection service starts up. */
 export const GUARDRAILS_SCAN_TIMEOUT = 180; // seconds
+/** Where a streamed reply is cut for scanning, so each scan sees whole sentences. */
+export const STREAM_SENTENCE_END = /[.!?\n]/;
+/** Streamed text is scanned once it has this many characters and a sentence end... */
+export const STREAM_SCAN_MIN_CHARS = 200;
+/** ...or once it has this many characters, whatever comes. */
+export const STREAM_SCAN_MAX_CHARS = 600;
 
 // Local guardrails
 /** Env var with the path of a guardrails YAML file that is loaded automatically. */
