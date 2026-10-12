@@ -3,6 +3,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import * as constants from "./constants";
+import type { MaskVault } from "./masking";
 import {
   type DetectedEntity,
   GuardrailAction,
@@ -77,13 +78,15 @@ export function loadGuardrails(configPath: string): GuardrailsConfig {
 /**
  * Check a text against every rule, in order, and apply redactions.
  * `block` rules throw `GuardrailsError`, `flag` rules only record a violation, and `redact`
- * rules replace every match with the rule's `replacement`.
+ * rules replace every match with the rule's `replacement` (or, with a `vault`, with a
+ * restorable placeholder such as "[SSN_1]").
  * Returns `[redactedText, violations]`; `redactedText` equals `text` when nothing was redacted.
  */
 export function checkGuardrails(
   text: string,
   config: GuardrailsConfig,
   direction: GuardrailDirection,
+  vault?: MaskVault | null,
 ): [string, GuardrailViolation[]] {
   const violations: GuardrailViolation[] = [];
   let redacted = text;
@@ -108,8 +111,11 @@ export function checkGuardrails(
     }
 
     if (rule.action === GuardrailAction.REDACT) {
-      // A function, so "$&" or "$1" in the replacement is inserted as written.
-      redacted = redacted.replace(new RegExp(rule.pattern, "g"), () => rule.replacement);
+      // A function, so "$&" or "$1" in the replacement is inserted as written. With a vault,
+      // each value gets its own restorable placeholder instead of the static replacement.
+      redacted = redacted.replace(new RegExp(rule.pattern, "g"), (found) =>
+        vault ? vault.assign(rule.name, found) : rule.replacement,
+      );
     }
   }
 
@@ -124,8 +130,9 @@ export function applyGuardrails(
   text: string,
   config: GuardrailsConfig,
   direction: GuardrailDirection,
+  vault?: MaskVault | null,
 ): string {
-  const [redacted, violations] = checkGuardrails(text, config, direction);
+  const [redacted, violations] = checkGuardrails(text, config, direction, vault);
   for (const violation of violations) {
     console.warn(formatViolation(violation));
   }

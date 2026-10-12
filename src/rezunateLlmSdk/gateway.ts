@@ -8,6 +8,7 @@ import {
   GuardrailsError,
   ServerGuardrailsError,
 } from "./guardrails";
+import { MaskVault, splitTrailingPartial } from "./masking";
 import {
   type ChatCompletionChunk,
   type ChatCompletionRequest,
@@ -39,6 +40,11 @@ export interface ChatCompleteOptions {
    * `GUARDRAILS_FILE_PATH` env var is used, if any.
    */
   guardrailsConfig?: GuardrailsConfig;
+  /**
+   * With a vault, `redact` rules mask the messages with restorable placeholders. The reply is
+   * not restored here: use `vault.restore()`, or `Gateway.chatComplete` with `reversible`.
+   */
+  vault?: MaskVault;
 }
 
 /**
@@ -69,7 +75,7 @@ async function complete(options: ChatCompleteOptions): Promise<ChatCompletionRes
   const request = ChatCompletionRequestSchema.parse(options.request);
   const config = options.guardrailsConfig ?? automaticGuardrails();
   if (config) {
-    guardInput(request, options.request, config);
+    guardInput(request, options.request, config, options.vault);
   }
 
   const providerInstance = createProvider(options, request);
@@ -89,7 +95,7 @@ async function* streamChat(options: ChatCompleteOptions): AsyncGenerator<ChatCom
     request = ChatCompletionRequestSchema.parse(options.request);
     config = options.guardrailsConfig ?? automaticGuardrails();
     if (config) {
-      guardInput(request, options.request, config);
+      guardInput(request, options.request, config, options.vault);
     }
     providerInstance = createProvider(options, request);
   } catch (error) {
@@ -126,12 +132,13 @@ function guardInput(
   request: ChatCompletionRequest,
   callerRequest: ChatCompletionRequest,
   config: GuardrailsConfig,
+  vault?: MaskVault,
 ): void {
   for (const [i, message] of request.messages.entries()) {
     if (!message.content) {
       continue;
     }
-    const redacted = applyGuardrails(message.content, config, GuardrailDirection.INPUT);
+    const redacted = applyGuardrails(message.content, config, GuardrailDirection.INPUT, vault);
     if (redacted !== message.content) {
       message.content = redacted;
       const callerMessage = callerRequest.messages[i];
@@ -175,6 +182,48 @@ async function* errorStream(
     chunk.error.code = error.statusCode;
   }
   yield chunk;
+}
+
+/**
+ * Restore placeholders in a streamed reply. A placeholder can be split across chunks, so an
+ * unfinished "[..." at the end of a chunk is held back and joined to the next one.
+ */
+async function* restoreStream(
+  chunks: AsyncIterable<ChatCompletionChunk>,
+  vault: MaskVault,
+): AsyncGenerator<ChatCompletionChunk> {
+  let carry = "";
+  let template: ChatCompletionChunk | null = null;
+
+  for await (const chunk of chunks) {
+    if (chunk.choices.length > 0) {
+      template ??= chunk;
+    }
+    for (const choice of chunk.choices) {
+      if (choice.delta.content !== null) {
+        const [safe, held] = splitTrailingPartial(carry + choice.delta.content);
+        carry = held;
+        choice.delta.content = vault.restore(safe);
+      }
+    }
+    yield chunk;
+  }
+
+  // Anything still held back goes out as one last text chunk.
+  if (carry && template) {
+    yield {
+      ...template,
+      usage: null,
+      choices: [
+        {
+          index: template.choices[0]?.index ?? 0,
+          delta: { role: null, content: vault.restore(carry) },
+          finish_reason: null,
+          provider_finish_reason: null,
+        },
+      ],
+    };
+  }
 }
 
 function errorType(error: unknown): string {
@@ -221,7 +270,22 @@ export interface GatewayOptions {
 /** Per-call options for `Gateway.chatComplete`; anything left out uses the gateway's defaults. */
 export type GatewayChatOptions = Partial<Omit<ChatCompleteOptions, "request">> & {
   serverGuardrails?: boolean | ServerGuardrailsConfig;
+  /**
+   * Mask PII in the messages with restorable placeholders (from `redact` rules and the server
+   * scan), and restore the reply. A new vault is used per call unless `vault` is passed.
+   * Keep one vault per end-user; never share one across users.
+   */
+  reversible?: boolean;
+  /** With `reversible`, restore the reply's placeholders (default true); false keeps it masked. */
+  rehydrate?: boolean;
 };
+
+/** What a guarded call applies, besides the plain chat options. */
+interface GuardedCall {
+  scan: ReadonlySet<GuardrailDirection>;
+  vault: MaskVault | undefined;
+  rehydrate: boolean;
+}
 
 /** Hosted PII detection, available as `gateway.guardrails`. */
 export interface GuardrailsResource {
@@ -287,7 +351,7 @@ export class Gateway {
     request: ChatCompletionRequest,
     options: GatewayChatOptions = {},
   ): Promise<ChatCompletionResponse> | AsyncIterable<ChatCompletionChunk> {
-    const { serverGuardrails, ...callOptions } = options;
+    const { serverGuardrails, reversible = false, rehydrate = true, ...callOptions } = options;
     const provider = callOptions.provider || this.defaultProvider;
     const apiKey = callOptions.apiKey || this.defaultApiKey;
     if (!provider || !apiKey) {
@@ -297,28 +361,35 @@ export class Gateway {
       return request?.stream === true ? errorStream(error, request.model) : Promise.reject(error);
     }
 
+    // A vault only for reversible calls, local to the call, so end-users never share masks.
+    const vault = reversible ? (callOptions.vault ?? new MaskVault()) : undefined;
     const chatOptions: ChatCompleteOptions = {
       ...callOptions,
       provider,
       apiKey,
       request,
       guardrailsConfig: callOptions.guardrailsConfig ?? this.guardrailsConfig ?? undefined,
+      vault,
     };
-    const scan = this.serverScanDirections(serverGuardrails);
+    const call: GuardedCall = {
+      scan: this.serverScanDirections(serverGuardrails),
+      vault,
+      rehydrate,
+    };
     return request?.stream === true
-      ? this.streamWithServerScan(chatOptions, scan)
-      : this.completeWithServerScan(chatOptions, scan);
+      ? this.streamGuarded(chatOptions, call)
+      : this.completeGuarded(chatOptions, call);
   }
 
-  private async completeWithServerScan(
+  private async completeGuarded(
     options: ChatCompleteOptions,
-    scan: ReadonlySet<GuardrailDirection>,
+    call: GuardedCall,
   ): Promise<ChatCompletionResponse> {
-    if (scan.has(GuardrailDirection.INPUT)) {
-      await this.scanMessages(options.request);
+    if (call.scan.has(GuardrailDirection.INPUT)) {
+      await this.scanMessages(options.request, call.vault);
     }
     const response = await complete(options);
-    if (scan.has(GuardrailDirection.OUTPUT)) {
+    if (call.scan.has(GuardrailDirection.OUTPUT)) {
       for (const choice of response.choices) {
         if (choice.message.content) {
           choice.message.content = await this.serverScan(
@@ -328,22 +399,32 @@ export class Gateway {
         }
       }
     }
+    // Restored last, after the output checks: placeholders pass them, and the restored PII
+    // isn't scanned again.
+    if (call.vault && call.rehydrate) {
+      for (const choice of response.choices) {
+        if (choice.message.content) {
+          choice.message.content = call.vault.restore(choice.message.content);
+        }
+      }
+    }
     return response;
   }
 
-  private async *streamWithServerScan(
+  private async *streamGuarded(
     options: ChatCompleteOptions,
-    scan: ReadonlySet<GuardrailDirection>,
+    call: GuardedCall,
   ): AsyncGenerator<ChatCompletionChunk> {
-    if (scan.has(GuardrailDirection.INPUT)) {
+    if (call.scan.has(GuardrailDirection.INPUT)) {
       try {
-        await this.scanMessages(options.request);
+        await this.scanMessages(options.request, call.vault);
       } catch (error) {
         yield* errorStream(error, options.request.model);
         return;
       }
     }
-    yield* streamChat(options);
+    const chunks = streamChat(options);
+    yield* call.vault && call.rehydrate ? restoreStream(chunks, call.vault) : chunks;
   }
 
   /** The sides to scan on a call: `true` means both, a config picks them, off means none. */
@@ -357,13 +438,27 @@ export class Gateway {
     return new Set(setting === true ? BOTH_DIRECTIONS : (setting.directions ?? BOTH_DIRECTIONS));
   }
 
-  /** Scan every message before it's sent; redacted text is written into it, as in Python. */
-  private async scanMessages(request: ChatCompletionRequest): Promise<void> {
+  /**
+   * Scan every message before it's sent; the result is written into it.
+   * With a vault, detected PII is masked with restorable placeholders instead.
+   */
+  private async scanMessages(request: ChatCompletionRequest, vault?: MaskVault): Promise<void> {
     for (const message of request.messages) {
       if (message.content) {
-        message.content = await this.serverScan(message.content, GuardrailDirection.INPUT);
+        message.content = vault
+          ? await this.serverScanReversible(message.content, vault)
+          : await this.serverScan(message.content, GuardrailDirection.INPUT);
       }
     }
+  }
+
+  /** Scan an input text and mask each detected span with its own placeholder in `vault`. */
+  private async serverScanReversible(text: string, vault: MaskVault): Promise<string> {
+    const result = await this.guardrails.scan(text);
+    if (result.blocked) {
+      throw new ServerGuardrailsError(GuardrailDirection.INPUT, result.entities, result.action);
+    }
+    return result.entities.length > 0 ? vault.maskEntities(text, result.entities) : text;
   }
 
   /** Scan one text with the hosted service: throws if it's blocked, else returns the result. */
