@@ -55,11 +55,15 @@ export type GoogleGenerationConfig = z.infer<typeof GoogleGenerationConfigSchema
 
 // ---- Tool surface ----------------------------------------------------------------------
 
-/** Gemini-shaped tool function declaration. */
+/**
+ * Gemini-shaped tool function declaration.
+ * `parametersJsonSchema` takes full JSON Schema (e.g. `additionalProperties`, `$ref`), which
+ * Gemini's older `parameters` field rejects; the two fields can't be sent together.
+ */
 export const GoogleFunctionDeclarationSchema = z.object({
   name: z.string(),
   description: z.string().default(""),
-  parameters: z.record(z.string(), z.unknown()).default(() => ({})),
+  parametersJsonSchema: z.record(z.string(), z.unknown()).default(() => ({})),
 });
 export type GoogleFunctionDeclaration = z.infer<typeof GoogleFunctionDeclarationSchema>;
 

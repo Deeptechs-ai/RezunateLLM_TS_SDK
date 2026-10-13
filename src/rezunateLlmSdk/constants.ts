@@ -52,3 +52,6 @@ export const GOOGLE_FINISH_REASONS = [
   "CONTINUATION",
   "FUNCTION_CALL",
 ] as const;
+
+// Tool Calls
+export const DEFAULT_TOOL_NAME = "tool"; // Gemini tool-result name when none is known
