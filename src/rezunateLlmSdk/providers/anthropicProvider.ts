@@ -67,11 +67,10 @@ export class AnthropicProvider extends BaseProvider {
         if (msg.content) {
           systemContent = msg.content;
         }
-        continue;
+      } else {
+        const anthropicRole = msg.role === Role.ASSISTANT ? "assistant" : "user";
+        anthropicMessages.push({ role: anthropicRole, content: msg.content ?? "" });
       }
-
-      const anthropicRole = msg.role === Role.ASSISTANT ? "assistant" : "user";
-      anthropicMessages.push({ role: anthropicRole, content: msg.content ?? "" });
     }
 
     return AnthropicRequestSchema.parse({

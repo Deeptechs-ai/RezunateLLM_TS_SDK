@@ -69,11 +69,10 @@ export class GoogleProvider extends BaseProvider {
         if (msg.content) {
           systemContent = msg.content;
         }
-        continue;
+      } else {
+        const googleRole = msg.role === Role.ASSISTANT ? "model" : "user";
+        googleMessages.push({ role: googleRole, parts: [{ text: msg.content || "" }] });
       }
-
-      const googleRole = msg.role === Role.ASSISTANT ? "model" : "user";
-      googleMessages.push({ role: googleRole, parts: [{ text: msg.content || "" }] });
     }
 
     const systemInstruction = systemContent ? { parts: [{ text: systemContent }] } : null;
