@@ -86,34 +86,8 @@ export class GoogleProvider extends BaseProvider {
         if (msg.content) {
           systemContent = msg.content;
         }
-        continue;
-      }
-
-      if (msg.role === Role.TOOL) {
-        let responsePayload: unknown;
-        try {
-          responsePayload = msg.content ? JSON.parse(msg.content) : {};
-        } catch {
-          responsePayload = { result: msg.content };
-        }
-        if (
-          responsePayload === null ||
-          typeof responsePayload !== "object" ||
-          Array.isArray(responsePayload)
-        ) {
-          responsePayload = { result: responsePayload };
-        }
-        const part: GoogleContentBlock = {
-          functionResponse: {
-            // Without a name, use the name of the tool call it answers (Python uses the id).
-            name:
-              msg.name ||
-              (msg.tool_call_id && toolNamesById.get(msg.tool_call_id)) ||
-              msg.tool_call_id ||
-              "tool",
-            response: responsePayload as Record<string, unknown>,
-          },
-        };
+      } else if (msg.role === Role.TOOL) {
+        const part = toolResultPart(msg, toolNamesById);
         // Gemini wants all results of one turn's (parallel) calls in a single message.
         if (toolResults) {
           toolResults.parts.push(part);
@@ -121,12 +95,11 @@ export class GoogleProvider extends BaseProvider {
           toolResults = { role: "user", parts: [part] };
           googleMessages.push(toolResults);
         }
-        continue;
+      } else {
+        toolResults = null;
+        const googleRole = msg.role === Role.ASSISTANT ? "model" : "user";
+        googleMessages.push({ role: googleRole, parts: messageToGoogleParts(msg) });
       }
-
-      toolResults = null;
-      const googleRole = msg.role === Role.ASSISTANT ? "model" : "user";
-      googleMessages.push({ role: googleRole, parts: messageToGoogleParts(msg) });
     }
 
     const systemInstruction = systemContent ? { parts: [{ text: systemContent }] } : null;
@@ -312,6 +285,34 @@ function messageToGoogleParts(msg: Message): GoogleContentBlock[] {
     parts.push({ text: "" });
   }
   return parts;
+}
+
+/** Render a `tool` message as a Gemini `functionResponse` part. */
+function toolResultPart(msg: Message, toolNamesById: Map<string, string>): GoogleContentBlock {
+  let responsePayload: unknown;
+  try {
+    responsePayload = msg.content ? JSON.parse(msg.content) : {};
+  } catch {
+    responsePayload = { result: msg.content };
+  }
+  if (
+    responsePayload === null ||
+    typeof responsePayload !== "object" ||
+    Array.isArray(responsePayload)
+  ) {
+    responsePayload = { result: responsePayload };
+  }
+  return {
+    functionResponse: {
+      // Without a name, use the name of the tool call it answers (Python uses the id).
+      name:
+        msg.name ||
+        (msg.tool_call_id && toolNamesById.get(msg.tool_call_id)) ||
+        msg.tool_call_id ||
+        "tool",
+      response: responsePayload as Record<string, unknown>,
+    },
+  };
 }
 
 /** Translate OpenAI-shaped tools into Gemini's `functionDeclarations`. */

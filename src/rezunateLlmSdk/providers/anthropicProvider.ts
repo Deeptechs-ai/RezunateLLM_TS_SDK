@@ -74,10 +74,7 @@ export class AnthropicProvider extends BaseProvider {
         if (msg.content) {
           systemContent = msg.content;
         }
-        continue;
-      }
-
-      if (msg.role === Role.TOOL) {
+      } else if (msg.role === Role.TOOL) {
         anthropicMessages.push({
           role: "user",
           content: [
@@ -88,12 +85,11 @@ export class AnthropicProvider extends BaseProvider {
             },
           ],
         });
-        continue;
+      } else {
+        const anthropicRole = msg.role === Role.ASSISTANT ? "assistant" : "user";
+        const blocks = messageToAnthropicBlocks(msg);
+        anthropicMessages.push({ role: anthropicRole, content: blocks ?? msg.content ?? "" });
       }
-
-      const anthropicRole = msg.role === Role.ASSISTANT ? "assistant" : "user";
-      const blocks = messageToAnthropicBlocks(msg);
-      anthropicMessages.push({ role: anthropicRole, content: blocks ?? msg.content ?? "" });
     }
 
     return AnthropicRequestSchema.parse({
