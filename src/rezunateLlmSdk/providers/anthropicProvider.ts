@@ -3,7 +3,6 @@
  * Transforms requests and responses between the OpenAI format and Anthropic's format.
  */
 
-import { randomUUID } from "node:crypto";
 import * as constants from "../constants";
 import {
   type ChatCompletionChunk,
@@ -101,14 +100,9 @@ export class AnthropicProvider extends BaseProvider {
     const stopReason = anthropicResponse.stop_reason;
     const content = textParts.length > 0 ? textParts.join("") : null;
 
-    const inputTokens = anthropicResponse.usage.input_tokens;
-    const outputTokens = anthropicResponse.usage.output_tokens;
-
-    return {
-      id: anthropicResponse.id || `chatcmpl-${randomUUID().replaceAll("-", "").slice(0, 8)}`,
-      object: "chat.completion",
-      created: Math.floor(Date.now() / 1000),
-      model: anthropicResponse.model || model || null,
+    return this.buildResponse({
+      id: anthropicResponse.id,
+      model: anthropicResponse.model || model,
       choices: [
         {
           index: 0,
@@ -117,14 +111,9 @@ export class AnthropicProvider extends BaseProvider {
           provider_finish_reason: stopReason,
         },
       ],
-      usage: {
-        prompt_tokens: inputTokens,
-        completion_tokens: outputTokens,
-        total_tokens: inputTokens + outputTokens,
-      },
-      provider: this.providerName,
-      error: null,
-    };
+      promptTokens: anthropicResponse.usage.input_tokens,
+      completionTokens: anthropicResponse.usage.output_tokens,
+    });
   }
 
   // ---- streaming hooks (driven by BaseProvider.stream) ----
