@@ -302,16 +302,14 @@ function toolResultPart(msg: Message, toolNamesById: Map<string, string>): Googl
   ) {
     responsePayload = { result: responsePayload };
   }
+  // Without a name, use the name of the tool call it answers (Python uses the id).
+  const name =
+    msg.name ||
+    (msg.tool_call_id && toolNamesById.get(msg.tool_call_id)) ||
+    msg.tool_call_id ||
+    constants.DEFAULT_TOOL_NAME;
   return {
-    functionResponse: {
-      // Without a name, use the name of the tool call it answers (Python uses the id).
-      name:
-        msg.name ||
-        (msg.tool_call_id && toolNamesById.get(msg.tool_call_id)) ||
-        msg.tool_call_id ||
-        "tool",
-      response: responsePayload as Record<string, unknown>,
-    },
+    functionResponse: { name, response: responsePayload as Record<string, unknown> },
   };
 }
 
