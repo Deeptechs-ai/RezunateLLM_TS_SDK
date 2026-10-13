@@ -22,6 +22,7 @@ import {
   ChatCompletionRequestSchema,
   ChatCompletionResponseSchema,
 } from "../src/rezunateLlmSdk/models";
+import { getProvider } from "../src/rezunateLlmSdk/providers";
 import { BaseProvider, type ProviderOptions } from "../src/rezunateLlmSdk/providers/base";
 import { mockApiKey, mockFetch, openaiResponse } from "./fixtures";
 
@@ -253,5 +254,51 @@ describe("abstract methods", () => {
     const Abstract = BaseProvider as unknown as new (options: ProviderOptions) => BaseProvider;
 
     expect(() => new Abstract({ apiKey: "test" })).toThrow(TypeError);
+  });
+});
+
+// New in the TS port: Python's error message has only the status and URL.
+describe("provider error messages", () => {
+  const request = () =>
+    ChatCompletionRequestSchema.parse({ model: "m", messages: [{ role: "user", content: "Hi" }] });
+
+  it.each([
+    ["anthropic", { error: { type: "not_found_error", message: "model: m" } }, "model: m"],
+    ["google", { error: { code: 404, message: "models/m is not found" } }, "models/m is not found"],
+    ["qwen", { code: "InvalidParameter", message: "Model not exist." }, "Model not exist."],
+  ])("adds the %s error message to the error", async (name, body, expected) => {
+    mockFetch({ json: body, status: 404 });
+
+    const result = await getProvider(name, mockApiKey).chatComplete(request());
+
+    expect(result.error?.code).toBe(404);
+    expect(result.error?.message).toMatch(/^404 .* for url: https:\/\/.* - /);
+    expect(result.error?.message).toContain(expected);
+  });
+
+  it("uses the raw text when the error body is not JSON", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("upstream unavailable", { status: 502 })),
+    );
+
+    const result = await getProvider("anthropic", mockApiKey, { maxRetries: 0 }).chatComplete(
+      request(),
+    );
+
+    expect(result.error?.message).toContain("- upstream unavailable");
+  });
+
+  it("keeps the plain message when the error body is empty", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 401 })),
+    );
+
+    const result = await getProvider("anthropic", mockApiKey).chatComplete(request());
+
+    expect(result.error?.message).toMatch(
+      /^401 .* for url: https:\/\/api\.anthropic\.com\/v1\/messages$/,
+    );
   });
 });

@@ -6,10 +6,16 @@
 
 export { type ChatCompleteOptions, chatComplete, getAvailableProviders } from "./gateway";
 export {
+  type ChatCompletionChunk,
+  ChatCompletionChunkSchema,
   type ChatCompletionRequest,
   ChatCompletionRequestSchema,
   type ChatCompletionResponse,
   ChatCompletionResponseSchema,
+  type ChoiceChunk,
+  ChoiceChunkSchema,
+  type ChoiceDelta,
+  ChoiceDeltaSchema,
   type Message,
   MessageSchema,
 } from "./models";

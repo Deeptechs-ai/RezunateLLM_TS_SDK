@@ -1,9 +1,16 @@
 import OpenAI, { type ClientOptions } from "openai";
-import type { ChatCompletionCreateParamsNonStreaming } from "openai/resources/chat/completions";
+import type {
+  ChatCompletionCreateParamsNonStreaming,
+  ChatCompletionCreateParamsStreaming,
+} from "openai/resources/chat/completions";
 import * as constants from "../constants";
-import type { ChatCompletionRequest, ChatCompletionResponse } from "../models";
-import { ChatCompletionResponseSchema, mapFinishReason } from "../models";
-import { BaseProvider, dropNones } from "./base";
+import type { ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse } from "../models";
+import {
+  ChatCompletionChunkSchema,
+  ChatCompletionResponseSchema,
+  mapFinishReason,
+} from "../models";
+import { BaseProvider, dropNones, withIdleTimeout } from "./base";
 import { OPENAI_CHAT_ENDPOINT } from "./endpoints";
 
 /**
@@ -68,28 +75,55 @@ export abstract class OpenAICompatibleProvider extends BaseProvider {
     return await this.client.chat.completions.create(params, { timeout: this.timeout * 1000 });
   }
 
-  /**
-   * Convert the SDK response to our internal model.
-   * Each finish_reason is translated first (e.g. DeepSeek's `insufficient_system_resource`,
-   * or a value we don't know yet), and the original is kept in `provider_finish_reason`.
-   */
+  /** Convert the SDK response to our internal model. */
   transformResponse(response: unknown): ChatCompletionResponse {
-    if (response === null || typeof response !== "object") {
-      return ChatCompletionResponseSchema.parse(response);
-    }
-
-    const data = { ...(response as Record<string, unknown>) };
-    if (Array.isArray(data.choices)) {
-      data.choices = data.choices.map((choice: unknown) => {
-        if (choice === null || typeof choice !== "object") {
-          return choice;
-        }
-        const reason = (choice as { finish_reason?: unknown }).finish_reason;
-        return typeof reason === "string"
-          ? { ...choice, finish_reason: mapFinishReason(reason), provider_finish_reason: reason }
-          : choice;
-      });
-    }
-    return ChatCompletionResponseSchema.parse(data);
+    return ChatCompletionResponseSchema.parse(withMappedFinishReasons(response));
   }
+
+  /**
+   * Stream chunks through the OpenAI SDK, which parses SSE itself.
+   * Only opening the stream is retried; any failure ends the stream with an error chunk.
+   */
+  override async *stream(request: ChatCompletionRequest): AsyncGenerator<ChatCompletionChunk> {
+    try {
+      // Passed as the SDK's param type, for the same reason as in `sendRequest`.
+      const params = { ...dropNones(request), stream: true } as ChatCompletionCreateParamsStreaming;
+      const ms = this.timeout * 1000;
+      // The SDK's timeout covers only the start; the idle timeout aborts a stream that goes silent.
+      const controller = new AbortController();
+      const sdkStream = await this.withRetries(() =>
+        this.client.chat.completions.create(params, { timeout: ms, signal: controller.signal }),
+      );
+      for await (const sdkChunk of withIdleTimeout(sdkStream, controller, ms)) {
+        const chunk = ChatCompletionChunkSchema.parse(withMappedFinishReasons(sdkChunk));
+        chunk.provider = this.providerName;
+        yield chunk;
+      }
+    } catch (error) {
+      yield this.errorChunk(error, request.model);
+    }
+  }
+}
+
+/**
+ * Translate each choice's finish_reason (e.g. DeepSeek's `insufficient_system_resource`,
+ * or a value we don't know yet) and keep the original in `provider_finish_reason`.
+ */
+function withMappedFinishReasons(data: unknown): unknown {
+  if (data === null || typeof data !== "object") {
+    return data;
+  }
+  const result = { ...(data as Record<string, unknown>) };
+  if (Array.isArray(result.choices)) {
+    result.choices = result.choices.map((choice: unknown) => {
+      if (choice === null || typeof choice !== "object") {
+        return choice;
+      }
+      const reason = (choice as { finish_reason?: unknown }).finish_reason;
+      return typeof reason === "string"
+        ? { ...choice, finish_reason: mapFinishReason(reason), provider_finish_reason: reason }
+        : choice;
+    });
+  }
+  return result;
 }

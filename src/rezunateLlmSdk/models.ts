@@ -54,7 +54,7 @@ export const FINISH_REASON_MAP: Readonly<Record<string, FinishReason>> = {
   // DeepSeek-specific — returned by deepseek-reasoner under resource pressure
   insufficient_system_resource: FinishReason.STOP,
   aborted: FinishReason.STOP,
-  // Google Gemini
+  // Google Gemini (image-only reasons are left out: the SDK is text-only, so they become stop)
   STOP: FinishReason.STOP,
   MAX_TOKENS: FinishReason.LENGTH,
   SAFETY: FinishReason.CONTENT_FILTER,
@@ -64,15 +64,10 @@ export const FINISH_REASON_MAP: Readonly<Record<string, FinishReason>> = {
   SPII: FinishReason.CONTENT_FILTER,
   OTHER: FinishReason.STOP,
   MALFORMED_FUNCTION_CALL: FinishReason.STOP,
-  IMAGE_SAFETY: FinishReason.CONTENT_FILTER,
-  IMAGE_PROHIBITED_CONTENT: FinishReason.CONTENT_FILTER,
-  IMAGE_RECITATION: FinishReason.CONTENT_FILTER,
   UNEXPECTED_TOOL_CALL: FinishReason.STOP,
   TOO_MANY_TOOL_CALLS: FinishReason.STOP,
   CONTINUATION: FinishReason.LENGTH,
   LANGUAGE: FinishReason.STOP,
-  NO_IMAGE: FinishReason.STOP,
-  IMAGE_OTHER: FinishReason.STOP,
   FINISH_REASON_UNSPECIFIED: FinishReason.STOP,
   // Anthropic
   end_turn: FinishReason.STOP,
@@ -144,7 +139,7 @@ export const ChoiceSchema = z.object({
   index: z.number().int().default(0),
   message: ResponseMessageSchema,
   finish_reason: FinishReasonSchema.nullable().default(null),
-  /** The provider's original finish/stop reason (e.g. "refusal", "IMAGE_SAFETY"), if any. */
+  /** The provider's original finish/stop reason (e.g. "refusal", "SAFETY"), if any. */
   provider_finish_reason: z.string().nullable().default(null),
 });
 export type Choice = z.infer<typeof ChoiceSchema>;
@@ -170,3 +165,33 @@ export const ChatCompletionResponseSchema = z.object({
   error: ErrorInfoSchema.nullable().default(null),
 });
 export type ChatCompletionResponse = z.infer<typeof ChatCompletionResponseSchema>;
+
+/** Incremental delta for a streaming choice (OpenAI chunk shape). */
+export const ChoiceDeltaSchema = z.object({
+  role: RoleSchema.nullable().default(null),
+  content: z.string().nullable().default(null),
+});
+export type ChoiceDelta = z.infer<typeof ChoiceDeltaSchema>;
+
+/** A single choice in a streaming chat completion chunk. */
+export const ChoiceChunkSchema = z.object({
+  index: z.number().int().default(0),
+  delta: ChoiceDeltaSchema.default(() => ({ role: null, content: null })),
+  finish_reason: FinishReasonSchema.nullable().default(null),
+  /** The provider's original finish/stop reason, if any (same as in `Choice`). */
+  provider_finish_reason: z.string().nullable().default(null),
+});
+export type ChoiceChunk = z.infer<typeof ChoiceChunkSchema>;
+
+/** One chunk of a streaming chat completion in OpenAI format. */
+export const ChatCompletionChunkSchema = z.object({
+  id: z.string().nullable().default(null),
+  object: z.string().default("chat.completion.chunk"),
+  created: z.number().int().default(0),
+  model: z.string().nullable().default(null),
+  choices: z.array(ChoiceChunkSchema).default(() => []),
+  usage: UsageSchema.nullable().default(null),
+  provider: ProviderSchema.nullable().default(null),
+  error: ErrorInfoSchema.nullable().default(null),
+});
+export type ChatCompletionChunk = z.infer<typeof ChatCompletionChunkSchema>;

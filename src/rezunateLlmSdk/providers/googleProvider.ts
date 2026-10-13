@@ -5,21 +5,29 @@
 
 import * as constants from "../constants";
 import {
+  type ChatCompletionChunk,
   type ChatCompletionRequest,
   type ChatCompletionResponse,
   type Choice,
+  type ChoiceDelta,
   FinishReason,
   mapFinishReason,
   Provider,
   Role,
 } from "../models";
-import { BaseProvider } from "./base";
-import { GOOGLE_BASE_URL, GOOGLE_GENERATE_CONTENT_ENDPOINT } from "./endpoints";
+import { BaseProvider, type StreamRequest, type StreamState } from "./base";
+import {
+  GOOGLE_BASE_URL,
+  GOOGLE_GENERATE_CONTENT_ENDPOINT,
+  GOOGLE_STREAM_GENERATE_CONTENT_ENDPOINT,
+  getUrl,
+} from "./endpoints";
 import {
   type GoogleMessage,
   type GoogleRequest,
   GoogleRequestSchema,
   GoogleResponseSchema,
+  GoogleStreamChunkSchema,
 } from "./googleModels";
 
 /** Google Gemini provider: handles transformation between OpenAI and Gemini formats. */
@@ -43,8 +51,7 @@ export class GoogleProvider extends BaseProvider {
 
   /** The endpoint includes the model name, e.g. `/models/gemini-2.0-flash:generateContent`. */
   getEndpoint(model?: string | null): string {
-    // Encoded so characters like "?" or "/" in a model name can't change the request path.
-    return GOOGLE_GENERATE_CONTENT_ENDPOINT.replaceAll("{model}", encodeURIComponent(model ?? ""));
+    return withModel(GOOGLE_GENERATE_CONTENT_ENDPOINT, model);
   }
 
   /**
@@ -61,11 +68,10 @@ export class GoogleProvider extends BaseProvider {
         if (msg.content) {
           systemContent = msg.content;
         }
-        continue;
+      } else {
+        const googleRole = msg.role === Role.ASSISTANT ? "model" : "user";
+        googleMessages.push({ role: googleRole, parts: [{ text: msg.content || "" }] });
       }
-
-      const googleRole = msg.role === Role.ASSISTANT ? "model" : "user";
-      googleMessages.push({ role: googleRole, parts: [{ text: msg.content || "" }] });
     }
 
     const systemInstruction = systemContent ? { parts: [{ text: systemContent }] } : null;
@@ -132,4 +138,71 @@ export class GoogleProvider extends BaseProvider {
       totalTokens: usageMeta.totalTokenCount,
     });
   }
+
+  // ---- streaming hooks (driven by BaseProvider.stream) ----
+
+  protected override buildStreamRequest(request: ChatCompletionRequest): StreamRequest {
+    const url = getUrl(
+      this.baseUrl,
+      withModel(GOOGLE_STREAM_GENERATE_CONTENT_ENDPOINT, request.model),
+    );
+    return { url, body: this.transformRequest(request), headers: this.getHeaders() };
+  }
+
+  /**
+   * Each frame is a small Gemini response; only the first candidate is streamed.
+   * A blocked prompt (no candidates, a blockReason) becomes one content_filter chunk.
+   */
+  protected override translateFrame(
+    _event: string,
+    data: string,
+    state: StreamState,
+  ): ChatCompletionChunk | null {
+    const payload = BaseProvider.parseJsonFrame(data);
+    if (payload === null) {
+      return null;
+    }
+    const frame = GoogleStreamChunkSchema.parse(payload);
+
+    const candidate = frame.candidates[0];
+    const blockReason = frame.promptFeedback?.blockReason ?? null;
+    if (!candidate && !blockReason) {
+      return null;
+    }
+
+    const text = (candidate?.content?.parts ?? []).map((part) => part.text ?? "").join("");
+
+    const usageMeta = frame.usageMetadata;
+    const usage = usageMeta && {
+      prompt_tokens: usageMeta.promptTokenCount,
+      completion_tokens: usageMeta.candidatesTokenCount,
+      total_tokens:
+        usageMeta.totalTokenCount || usageMeta.promptTokenCount + usageMeta.candidatesTokenCount,
+    };
+
+    const delta: Partial<ChoiceDelta> = {};
+    if (!state.roleSent) {
+      delta.role = Role.ASSISTANT;
+      state.roleSent = true;
+    }
+    if (text) {
+      delta.content = text;
+    }
+
+    const chunk = this.makeChunk(state, {
+      delta,
+      finishReason: candidate ? candidate.finishReason : blockReason,
+      usage,
+    });
+    const choice = chunk.choices[0];
+    if (!candidate && choice) {
+      choice.finish_reason = FinishReason.CONTENT_FILTER;
+    }
+    return chunk;
+  }
+}
+
+/** Put the model into an endpoint, encoded so "?" or "/" in a name can't change the path. */
+function withModel(endpoint: string, model?: string | null): string {
+  return endpoint.replaceAll("{model}", encodeURIComponent(model ?? ""));
 }

@@ -32,7 +32,7 @@ export const ANTHROPIC_STOP_REASONS = [
 ] as const;
 
 /**
- * Finish reasons Gemini documents today (all translated by FINISH_REASON_MAP).
+ * Finish reasons Gemini documents today for text (all translated by FINISH_REASON_MAP).
  * The response accepts any other value too, so a new one never breaks a reply.
  */
 export const GOOGLE_FINISH_REASONS = [
@@ -47,13 +47,8 @@ export const GOOGLE_FINISH_REASONS = [
   "PROHIBITED_CONTENT",
   "SPII",
   "MALFORMED_FUNCTION_CALL",
-  "IMAGE_SAFETY",
   "UNEXPECTED_TOOL_CALL",
   "TOO_MANY_TOOL_CALLS",
-  "IMAGE_PROHIBITED_CONTENT",
-  "NO_IMAGE",
-  "IMAGE_RECITATION",
-  "IMAGE_OTHER",
   "CONTINUATION",
   "FUNCTION_CALL",
 ] as const;

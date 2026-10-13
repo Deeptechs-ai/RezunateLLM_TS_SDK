@@ -130,3 +130,9 @@ export const GoogleResponseSchema = z.object({
   })),
 });
 export type GoogleResponse = z.infer<typeof GoogleResponseSchema>;
+
+/** One streamed Gemini frame: a response whose `usageMetadata` may be missing. */
+export const GoogleStreamChunkSchema = GoogleResponseSchema.extend({
+  usageMetadata: GoogleUsageSchema.nullable().default(null),
+});
+export type GoogleStreamChunk = z.infer<typeof GoogleStreamChunkSchema>;
