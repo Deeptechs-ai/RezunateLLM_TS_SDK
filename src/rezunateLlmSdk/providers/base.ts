@@ -3,12 +3,14 @@
  * All providers inherit from this class.
  */
 
+import { randomUUID } from "node:crypto";
 import type { z } from "zod";
 import * as constants from "../constants";
 import {
   type ChatCompletionChunk,
   type ChatCompletionRequest,
   type ChatCompletionResponse,
+  type Choice,
   type ChoiceDelta,
   type ErrorInfo,
   mapFinishReason,
@@ -122,6 +124,23 @@ function isTimeoutOrConnectionError(error: unknown): boolean {
 
 function sleep(seconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+}
+
+/** A new OpenAI-style completion id, e.g. `chatcmpl-1a2b3c4d`. */
+export function newCompletionId(): string {
+  return `chatcmpl-${randomUUID().replaceAll("-", "").slice(0, 8)}`;
+}
+
+/** The parts of a response that differ per provider; `buildResponse` fills in the rest. */
+export interface ResponseFields {
+  /** The provider's id; a `chatcmpl-…` id is generated when it is missing. */
+  id?: string | null;
+  model?: string | null;
+  choices: Choice[];
+  promptTokens?: number;
+  completionTokens?: number;
+  /** The provider's total; prompt + completion is used when it is missing or 0. */
+  totalTokens?: number;
 }
 
 /** Number of retries made before a request finally failed, attached to the thrown error. */
@@ -350,25 +369,24 @@ export abstract class BaseProvider {
         const retryable =
           this.isRetryable(statusCodeOf(error)) || isTimeoutOrConnectionError(error);
 
-        if (attempt < this.maxRetries && retryable) {
-          await sleep(this.calculateBackoff(attempt));
-          continue;
+        if (attempt >= this.maxRetries || !retryable) {
+          // No more retries: record how many were made, for the error response.
+          // Replaceable, so a reused error object can get a new count; a frozen error keeps none.
+          if (error !== null && typeof error === "object") {
+            try {
+              Object.defineProperty(error, RETRIES_ATTEMPTED, {
+                value: attempt,
+                writable: true,
+                configurable: true,
+              });
+            } catch {
+              // The error can't be changed: pass it on without the retry count.
+            }
+          }
+          throw error;
         }
 
-        // No more retries: record how many were made, for the error response.
-        // Replaceable, so a reused error object can get a new count; a frozen error keeps none.
-        if (error !== null && typeof error === "object") {
-          try {
-            Object.defineProperty(error, RETRIES_ATTEMPTED, {
-              value: attempt,
-              writable: true,
-              configurable: true,
-            });
-          } catch {
-            // The error can't be changed: pass it on without the retry count.
-          }
-        }
-        throw error;
+        await sleep(this.calculateBackoff(attempt));
       }
     }
   }
@@ -397,6 +415,26 @@ export abstract class BaseProvider {
       return this.responseModel.parse(providerResponseData);
     }
     return providerResponseData;
+  }
+
+  /** Build a successful response in OpenAI format from the provider-specific parts. */
+  protected buildResponse(fields: ResponseFields): ChatCompletionResponse {
+    const promptTokens = fields.promptTokens ?? 0;
+    const completionTokens = fields.completionTokens ?? 0;
+    return {
+      id: fields.id || newCompletionId(),
+      object: "chat.completion",
+      created: Math.floor(Date.now() / 1000),
+      model: fields.model ?? null,
+      choices: fields.choices,
+      usage: {
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: fields.totalTokens || promptTokens + completionTokens,
+      },
+      provider: this.providerName,
+      error: null,
+    };
   }
 
   /** Centralized error handling for all providers. */
@@ -448,7 +486,7 @@ export abstract class BaseProvider {
   /** Per-stream state. Defaults to a fresh `StreamState`. */
   protected newStreamState(request: ChatCompletionRequest): StreamState {
     return {
-      id: `chatcmpl-${crypto.randomUUID().replaceAll("-", "").slice(0, 8)}`,
+      id: newCompletionId(),
       model: request.model,
       created: Math.floor(Date.now() / 1000),
       inputTokens: 0,
