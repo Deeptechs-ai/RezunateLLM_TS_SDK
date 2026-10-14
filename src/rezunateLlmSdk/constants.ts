@@ -34,6 +34,12 @@ export const STREAM_SCAN_MIN_CHARS = 200;
 /** ...or once it has this many characters, whatever comes. */
 export const STREAM_SCAN_MAX_CHARS = 600;
 
+// Reversible masking
+/** Hex digits of the value's hash in a placeholder, e.g. "[PERSON_7f3a]" (as the guard CLI). */
+export const MASK_SUFFIX_DIGITS = 4;
+/** Size of a vault's random placeholder key. */
+export const MASK_KEY_BYTES = 32;
+
 // Local guardrails
 /** Env var with the path of a guardrails YAML file that is loaded automatically. */
 export const GUARDRAILS_FILE_PATH_ENV = "GUARDRAILS_FILE_PATH";

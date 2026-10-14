@@ -7,9 +7,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { chatComplete, Gateway, type GatewayOptions } from "../src/rezunateLlmSdk/gateway";
 import { checkGuardrails } from "../src/rezunateLlmSdk/guardrails";
-import { MaskVault, unmask } from "../src/rezunateLlmSdk/masking";
+import { MaskVault, placeholder, unmask } from "../src/rezunateLlmSdk/masking";
 import { type ChatCompletionChunk, GuardrailsConfigSchema } from "../src/rezunateLlmSdk/models";
-import { anthropicResponse, mockFetch, mockStreamFetch, sseEvent } from "./fixtures";
+import { anthropicResponse, mockFetch, mockStreamFetch, sseEvent, TEST_MASK_KEY } from "./fixtures";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -52,14 +52,19 @@ function gateway(options: GatewayOptions = {}) {
 const sentBody = (fetch: ReturnType<typeof mockFetch>, call = 0) =>
   String(fetch.mock.calls[call]?.[1]?.body);
 
+/** The placeholder a value gets with the test key, e.g. for a local "ssn" rule. */
+const code = (label: string, value: string) => placeholder(label, value, TEST_MASK_KEY);
+const SSN = code("ssn", "123-45-6789");
+const ANY_SSN_PLACEHOLDER = /\[SSN_[0-9a-f]+\]/;
+
 describe("local regex rules with a vault", () => {
   it("gives each value its own restorable placeholder", () => {
-    const vault = new MaskVault();
+    const vault = new MaskVault(TEST_MASK_KEY);
     const text = "SSNs 111-22-3333 and 444-55-6666";
 
     const [redacted] = checkGuardrails(text, redactConfig(), "input", vault);
 
-    expect(redacted).toBe("SSNs [SSN_1] and [SSN_2]");
+    expect(redacted).toBe(`SSNs ${code("ssn", "111-22-3333")} and ${code("ssn", "444-55-6666")}`);
     expect(vault.restore(redacted)).toBe(text);
   });
 
@@ -73,15 +78,15 @@ describe("local regex rules with a vault", () => {
 describe("reversible masking through the Gateway", () => {
   it("masks the input and restores the reply", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    const fetch = mockFetch(anthropicReplyWith("Your number [SSN_1] is on file."));
+    const fetch = mockFetch(anthropicReplyWith(`Your number ${SSN} is on file.`));
 
     const result = await gateway({ guardrailsConfig: redactConfig() }).chatComplete(
       request("My SSN is 123-45-6789"),
-      { reversible: true },
+      { reversible: true, vault: new MaskVault(TEST_MASK_KEY) },
     );
 
     expect(sentBody(fetch)).not.toContain("123-45-6789");
-    expect(sentBody(fetch)).toContain("[SSN_1]");
+    expect(sentBody(fetch)).toContain(SSN);
     expect(result.choices[0]?.message.content).toBe("Your number 123-45-6789 is on file.");
   });
 
@@ -94,28 +99,28 @@ describe("reversible masking through the Gateway", () => {
     );
 
     expect(sentBody(fetch)).toContain("[SSN]");
-    expect(sentBody(fetch)).not.toContain("[SSN_1]");
+    expect(sentBody(fetch)).not.toMatch(ANY_SSN_PLACEHOLDER);
     expect(result.choices[0]?.message.content).toBe("noted [SSN]");
   });
 
   it("keeps the reply masked with rehydrate: false", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    mockFetch(anthropicReplyWith("Noted [SSN_1]."));
-    const vault = new MaskVault();
+    mockFetch(anthropicReplyWith(`Noted ${SSN}.`));
+    const vault = new MaskVault(TEST_MASK_KEY);
 
     const result = await gateway({ guardrailsConfig: redactConfig() }).chatComplete(
       request("My SSN is 123-45-6789"),
       { reversible: true, vault, rehydrate: false },
     );
 
-    expect(result.choices[0]?.message.content).toBe("Noted [SSN_1].");
+    expect(result.choices[0]?.message.content).toBe(`Noted ${SSN}.`);
     expect(vault.restore(result.choices[0]?.message.content ?? "")).toBe("Noted 123-45-6789.");
   });
 
   it("masks the input but leaves the reply to the caller in the plain chatComplete", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    mockFetch(anthropicReplyWith("ok [SSN_1]"));
-    const vault = new MaskVault();
+    mockFetch(anthropicReplyWith(`ok ${SSN}`));
+    const vault = new MaskVault(TEST_MASK_KEY);
 
     const result = await chatComplete({
       provider: "anthropic",
@@ -125,22 +130,22 @@ describe("reversible masking through the Gateway", () => {
       vault,
     });
 
-    expect(result.choices[0]?.message.content).toBe("ok [SSN_1]");
+    expect(result.choices[0]?.message.content).toBe(`ok ${SSN}`);
     expect(unmask(result.choices[0]?.message.content ?? "", vault)).toBe("ok 123-45-6789");
   });
 
-  it("keeps the numbering when a conversation is resumed from a saved vault", async () => {
+  it("keeps the same placeholders when a conversation is resumed from a saved vault", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const config = redactConfig();
-    const vault = new MaskVault();
-    mockFetch(anthropicReplyWith("ok [SSN_1]"));
+    const vault = new MaskVault(TEST_MASK_KEY);
+    mockFetch(anthropicReplyWith(`ok ${SSN}`));
     await gateway({ guardrailsConfig: config }).chatComplete(request("SSN 123-45-6789"), {
       reversible: true,
       vault,
     });
     const saved = vault.dumps();
 
-    mockFetch(anthropicReplyWith("both [SSN_1] and [SSN_2]"));
+    mockFetch(anthropicReplyWith(`both ${SSN} and ${code("ssn", "999-88-7777")}`));
     const result = await gateway({ guardrailsConfig: config }).chatComplete(
       request("and 999-88-7777"),
       { reversible: true, vault: MaskVault.loads(saved) },
@@ -161,7 +166,7 @@ describe("reversible masking through the Gateway", () => {
           text: "My email is [EMAIL].",
         },
       },
-      anthropicReplyWith("Confirmed [EMAIL_ADDRESS_1]."),
+      anthropicReplyWith(`Confirmed ${code("email address", "john@acme.com")}.`),
     );
     const gw = gateway({
       guardrailsConfig: NO_LOCAL_RULES,
@@ -170,10 +175,11 @@ describe("reversible masking through the Gateway", () => {
 
     const result = await gw.chatComplete(request("My email is john@acme.com"), {
       reversible: true,
+      vault: new MaskVault(TEST_MASK_KEY),
     });
 
     expect(sentBody(fetch, 1)).not.toContain("john@acme.com");
-    expect(sentBody(fetch, 1)).toContain("[EMAIL_ADDRESS_1]");
+    expect(sentBody(fetch, 1)).toContain(code("email address", "john@acme.com"));
     expect(result.choices[0]?.message.content).toBe("Confirmed john@acme.com.");
   });
 
@@ -186,8 +192,8 @@ describe("reversible masking through the Gateway", () => {
         sseEvent("message_start", {
           message: { id: "m", model: "claude-sonnet-4-20250514", usage: { input_tokens: 5 } },
         }),
-        textDelta("Number [SSN"),
-        textDelta("_1] noted."),
+        textDelta(`Number ${SSN.slice(0, 4)}`),
+        textDelta(`${SSN.slice(4)} noted.`),
         sseEvent("message_delta", {
           delta: { stop_reason: "end_turn" },
           usage: { output_tokens: 6 },
@@ -199,7 +205,7 @@ describe("reversible masking through the Gateway", () => {
     const chunks: ChatCompletionChunk[] = [];
     for await (const chunk of gateway({ guardrailsConfig: redactConfig() }).chatComplete(
       { ...request("My SSN is 123-45-6789"), stream: true },
-      { reversible: true },
+      { reversible: true, vault: new MaskVault(TEST_MASK_KEY) },
     )) {
       chunks.push(chunk);
     }
@@ -233,7 +239,11 @@ describe("reversible masking through the Gateway", () => {
 
     // Every caller gets exactly its own values back...
     expect(results.map((r) => r.choices[0]?.message.content)).toEqual(originals);
-    // ...and each call used its own vault, so the provider only ever saw "_1" placeholders.
-    expect(seenByProvider.every((text) => text === "Contact [EMAIL_1], SSN [SSN_1].")).toBe(true);
+    // ...and the provider only ever saw placeholders, never a real value.
+    expect(
+      seenByProvider.every((text) =>
+        /^Contact \[EMAIL_[0-9a-f]+\], SSN \[SSN_[0-9a-f]+\]\.$/.test(text),
+      ),
+    ).toBe(true);
   });
 });

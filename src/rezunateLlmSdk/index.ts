@@ -26,7 +26,7 @@ export {
   loadGuardrails,
   ServerGuardrailsError,
 } from "./guardrails";
-export { type MaskSpan, MaskVault, unmask } from "./masking";
+export { MaskingError, type MaskSpan, MaskVault, unmask } from "./masking";
 export {
   type ChatCompletionChunk,
   ChatCompletionChunkSchema,

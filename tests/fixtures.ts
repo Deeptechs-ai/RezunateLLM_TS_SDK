@@ -8,6 +8,9 @@ import { vi } from "vitest";
 /** A mock API key for testing. */
 export const mockApiKey = "test-api-key-12345";
 
+/** A fixed masking key, so tests know each value's placeholder in advance. */
+export const TEST_MASK_KEY = new Uint8Array(32).fill(7);
+
 /** Sample messages in OpenAI format. */
 export function sampleMessages() {
   return [

@@ -27,6 +27,7 @@ describe("package entry point", () => {
         "MetaProvider",
         "FunctionCallSchema",
         "FunctionDefinitionSchema",
+        "MaskingError",
         "MaskVault",
         "MessageSchema",
         "PromptResponseSchema",

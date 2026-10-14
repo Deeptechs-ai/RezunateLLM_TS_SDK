@@ -1,4 +1,10 @@
-/** Reversible masking: PII is replaced with placeholders, then restored in the reply. */
+/**
+ * Reversible masking: PII is replaced with placeholders, then restored in the reply.
+ * Placeholders are built as in the Python `rezunate_guard/masking.py`: a hash of the value.
+ */
+
+import { createHmac, randomBytes } from "node:crypto";
+import * as constants from "./constants";
 
 /** A detected span to mask: `start`/`end` are character positions, as the scan reports them. */
 export interface MaskSpan {
@@ -7,25 +13,51 @@ export interface MaskSpan {
   label: string;
 }
 
+/** Spans could not be masked safely. Callers must withhold the content. */
+export class MaskingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MaskingError";
+  }
+}
+
+/** A full placeholder: an upper-case tag, then lower-case hex digits. */
+const PLACEHOLDER_PATTERN = /\[[A-Z0-9_]+_[0-9a-f]+\]/g;
+
 /** Make a placeholder tag from a label: "email address" -> "EMAIL_ADDRESS". */
-function normalizeLabel(label: string): string {
-  const tag = label
+function tag(label: string): string {
+  const result = label
     .trim()
     .replace(/[^A-Za-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "")
     .toUpperCase();
-  return tag || "PII";
+  return result || "PII";
+}
+
+/** The placeholder for one value, e.g. "[PERSON_7f3a]": its tag and the start of its hash. */
+export function placeholder(
+  label: string,
+  value: string,
+  key: Uint8Array,
+  digits: number = constants.MASK_SUFFIX_DIGITS,
+): string {
+  const digest = createHmac("sha256", key).update(value, "utf8").digest("hex");
+  return `[${tag(label)}_${digest.slice(0, digits)}]`;
 }
 
 /**
  * A two-way map between PII values and placeholder tokens.
- * The same value always gets the same placeholder (so the model sees
- * "[PERSON_1] emailed [PERSON_1]"), and each distinct value gets its own.
+ * The same value always gets the same placeholder, and each distinct value gets its own.
  */
 export class MaskVault {
+  private readonly key: Uint8Array;
   private readonly toPlaceholder = new Map<string, string>();
   private readonly toOriginal = new Map<string, string>();
-  private readonly counters = new Map<string, number>();
+
+  /** `key` makes the placeholders; a random one is made when it is left out. */
+  constructor(key: Uint8Array = randomBytes(constants.MASK_KEY_BYTES)) {
+    this.key = key;
+  }
 
   /** Return the placeholder for `original`, creating a new one if it hasn't been seen. */
   assign(label: string, original: string): string {
@@ -34,18 +66,22 @@ export class MaskVault {
       return existing;
     }
 
-    const tag = normalizeLabel(label);
-    const count = (this.counters.get(tag) ?? 0) + 1;
-    this.counters.set(tag, count);
-    const placeholder = `[${tag}_${count}]`;
-    this.toPlaceholder.set(original, placeholder);
-    this.toOriginal.set(placeholder, original);
-    return placeholder;
+    // Two values can share the first digits of their hash; the later one gets more digits.
+    let digits = constants.MASK_SUFFIX_DIGITS;
+    let token = placeholder(label, original, this.key, digits);
+    while (this.toOriginal.has(token)) {
+      digits += 2;
+      token = placeholder(label, original, this.key, digits);
+    }
+    this.toPlaceholder.set(original, token);
+    this.toOriginal.set(token, original);
+    return token;
   }
 
   /**
    * Replace detected spans in `text` with placeholders.
-   * Spans are replaced right to left so positions stay valid; overlapping spans are skipped.
+   * Spans are replaced right to left so positions stay valid; spans outside the text are skipped.
+   * Throws `MaskingError` if two spans overlap, as masking them would corrupt the text.
    */
   maskEntities(text: string, entities: Iterable<MaskSpan>): string {
     // Positions count characters as Python does (an emoji is one character, not two).
@@ -56,36 +92,28 @@ export class MaskVault {
       label: String(label),
     })).sort((a, b) => b.start - a.start);
 
-    let prevStart: number | null = null;
+    // Spans are checked against the original length, not the text being changed.
+    const length = chars.length;
+    let previousStart = length;
     for (const { start, end, label } of spans) {
-      if (start < 0 || end > chars.length || start >= end) {
-        continue;
+      if (start >= 0 && end <= length && start < end) {
+        if (end > previousStart) {
+          throw new MaskingError(`Overlapping spans at ${start}:${end} could not be masked.`);
+        }
+        const token = this.assign(label, chars.slice(start, end).join(""));
+        chars.splice(start, end - start, token);
+        previousStart = start;
       }
-      // Right to left, so a span that ends past the previous span's start overlaps it.
-      if (prevStart !== null && end > prevStart) {
-        continue;
-      }
-      const placeholder = this.assign(label, chars.slice(start, end).join(""));
-      chars.splice(start, end - start, placeholder);
-      prevStart = start;
     }
     return chars.join("");
   }
 
-  /** Swap every known placeholder in `text` back to its original value. */
+  /** Swap every known placeholder in `text` back to its original value, in one pass. */
   restore(text: string): string {
     if (this.toOriginal.size === 0 || !text) {
       return text;
     }
-    // Longest placeholder first, so no token is a prefix of another.
-    const pairs = [...this.toOriginal].sort(([a], [b]) => b.length - a.length);
-    let restored = text;
-    for (const [placeholder, original] of pairs) {
-      if (restored.includes(placeholder)) {
-        restored = restored.replaceAll(placeholder, original);
-      }
-    }
-    return restored;
+    return text.replace(PLACEHOLDER_PATTERN, (found) => this.toOriginal.get(found) ?? found);
   }
 
   /** True if nothing has been masked yet. */
@@ -101,24 +129,18 @@ export class MaskVault {
   /** Serialize to JSON, to resume a conversation later. It holds real PII: encrypt it. */
   dumps(): string {
     return JSON.stringify({
+      key: Buffer.from(this.key).toString("hex"),
       map: Object.fromEntries(this.toOriginal),
-      counters: Object.fromEntries(this.counters),
     });
   }
 
-  /** Rebuild a vault from `dumps()` output. */
+  /** Rebuild a vault from `dumps()` output, with the same key, so values keep their placeholders. */
   static loads(data: string): MaskVault {
-    const parsed = JSON.parse(data) as {
-      map?: Record<string, string>;
-      counters?: Record<string, number>;
-    };
-    const vault = new MaskVault();
-    for (const [placeholder, original] of Object.entries(parsed.map ?? {})) {
-      vault.toOriginal.set(placeholder, original);
-      vault.toPlaceholder.set(original, placeholder);
-    }
-    for (const [tag, count] of Object.entries(parsed.counters ?? {})) {
-      vault.counters.set(tag, Number(count));
+    const parsed = JSON.parse(data) as { key?: string; map?: Record<string, string> };
+    const vault = parsed.key ? new MaskVault(Buffer.from(parsed.key, "hex")) : new MaskVault();
+    for (const [token, original] of Object.entries(parsed.map ?? {})) {
+      vault.toOriginal.set(token, original);
+      vault.toPlaceholder.set(original, token);
     }
     return vault;
   }
