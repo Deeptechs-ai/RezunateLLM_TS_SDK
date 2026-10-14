@@ -121,15 +121,14 @@ function guardInput(
   config: GuardrailsConfig,
 ): void {
   for (const [i, message] of request.messages.entries()) {
-    if (!message.content) {
-      continue;
-    }
-    const redacted = applyGuardrails(message.content, config, GuardrailDirection.INPUT);
-    if (redacted !== message.content) {
-      message.content = redacted;
-      const callerMessage = callerRequest.messages[i];
-      if (callerMessage) {
-        callerMessage.content = redacted;
+    if (message.content) {
+      const redacted = applyGuardrails(message.content, config, GuardrailDirection.INPUT);
+      if (redacted !== message.content) {
+        message.content = redacted;
+        const callerMessage = callerRequest.messages[i];
+        if (callerMessage) {
+          callerMessage.content = redacted;
+        }
       }
     }
   }
