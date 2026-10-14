@@ -94,28 +94,26 @@ export function checkGuardrails(
   for (const rule of config.guardrails) {
     // Matches are found in the original text, as in the Python SDK.
     const match = new RegExp(rule.pattern).exec(text);
-    if (!match) {
-      continue;
-    }
+    if (match) {
+      violations.push({
+        ruleName: rule.name,
+        ruleDescription: rule.description,
+        direction,
+        action: rule.action,
+        match: match[0],
+      });
 
-    violations.push({
-      ruleName: rule.name,
-      ruleDescription: rule.description,
-      direction,
-      action: rule.action,
-      match: match[0],
-    });
+      if (rule.action === GuardrailAction.BLOCK) {
+        throw new GuardrailsError(rule.name, rule.description, direction);
+      }
 
-    if (rule.action === GuardrailAction.BLOCK) {
-      throw new GuardrailsError(rule.name, rule.description, direction);
-    }
-
-    if (rule.action === GuardrailAction.REDACT) {
-      // A function, so "$&" or "$1" in the replacement is inserted as written. With a vault,
-      // each value gets its own restorable placeholder instead of the static replacement.
-      redacted = redacted.replace(new RegExp(rule.pattern, "g"), (found) =>
-        vault ? vault.assign(rule.name, found) : rule.replacement,
-      );
+      if (rule.action === GuardrailAction.REDACT) {
+        // A function, so "$&" or "$1" in the replacement is inserted as written. With a vault,
+        // each value gets its own restorable placeholder instead of the static replacement.
+        redacted = redacted.replace(new RegExp(rule.pattern, "g"), (found) =>
+          vault ? vault.assign(rule.name, found) : rule.replacement,
+        );
+      }
     }
   }
 

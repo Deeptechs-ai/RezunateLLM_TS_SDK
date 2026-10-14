@@ -136,15 +136,14 @@ function guardInput(
   vault?: MaskVault,
 ): void {
   for (const [i, message] of request.messages.entries()) {
-    if (!message.content) {
-      continue;
-    }
-    const redacted = applyGuardrails(message.content, config, GuardrailDirection.INPUT, vault);
-    if (redacted !== message.content) {
-      message.content = redacted;
-      const callerMessage = callerRequest.messages[i];
-      if (callerMessage) {
-        callerMessage.content = redacted;
+    if (message.content) {
+      const redacted = applyGuardrails(message.content, config, GuardrailDirection.INPUT, vault);
+      if (redacted !== message.content) {
+        message.content = redacted;
+        const callerMessage = callerRequest.messages[i];
+        if (callerMessage) {
+          callerMessage.content = redacted;
+        }
       }
     }
   }
@@ -410,7 +409,10 @@ export class Gateway {
   ): Promise<ChatCompletionResponse> | AsyncIterable<ChatCompletionChunk> {
     const { serverGuardrails, reversible = false, rehydrate = true, ...callOptions } = options;
     const provider = callOptions.provider || this.defaultProvider;
-    const apiKey = callOptions.apiKey || this.defaultApiKey;
+    // The default key belongs to the default provider; another provider needs its own key.
+    // (Python reuses it for any provider, which sends one provider's key to another.)
+    const keyFitsProvider = !this.defaultProvider || provider === this.defaultProvider;
+    const apiKey = callOptions.apiKey || (keyFitsProvider ? this.defaultApiKey : null);
     if (!provider || !apiKey) {
       const error = new Error(
         provider ? "API key must be specified" : "Provider must be specified",
