@@ -30,3 +30,44 @@ export const PROMPT_ENDPOINT = `/api/${REZUNATE_LLM_API_VERSION}/prompts`;
 export const GUARDRAILS_FILE_PATH_ENV = "GUARDRAILS_FILE_PATH";
 /** Text that replaces each match of a `redact` rule that sets no `replacement`. */
 export const DEFAULT_REDACTION = "[REDACTED]";
+
+// Provider finish/stop reasons (reference lists; FINISH_REASON_MAP in models.ts translates them)
+
+/**
+ * Stop reasons Anthropic documents today (all translated by FINISH_REASON_MAP).
+ * The response accepts any other value too, so a new one never breaks a reply.
+ */
+export const ANTHROPIC_STOP_REASONS = [
+  "end_turn",
+  "stop_sequence",
+  "max_tokens",
+  "tool_use",
+  "refusal",
+  "model_context_window_exceeded",
+  "pause_turn",
+] as const;
+
+/**
+ * Finish reasons Gemini documents today for text (all translated by FINISH_REASON_MAP).
+ * The response accepts any other value too, so a new one never breaks a reply.
+ */
+export const GOOGLE_FINISH_REASONS = [
+  "FINISH_REASON_UNSPECIFIED",
+  "STOP",
+  "MAX_TOKENS",
+  "SAFETY",
+  "RECITATION",
+  "LANGUAGE",
+  "OTHER",
+  "BLOCKLIST",
+  "PROHIBITED_CONTENT",
+  "SPII",
+  "MALFORMED_FUNCTION_CALL",
+  "UNEXPECTED_TOOL_CALL",
+  "TOO_MANY_TOOL_CALLS",
+  "CONTINUATION",
+  "FUNCTION_CALL",
+] as const;
+
+// Tool Calls
+export const DEFAULT_TOOL_NAME = "tool"; // Gemini tool-result name when none is known

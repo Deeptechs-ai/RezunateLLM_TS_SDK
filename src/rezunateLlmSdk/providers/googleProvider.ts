@@ -87,34 +87,8 @@ export class GoogleProvider extends BaseProvider {
         if (msg.content) {
           systemContent = msg.content;
         }
-        continue;
-      }
-
-      if (msg.role === Role.TOOL) {
-        let responsePayload: unknown;
-        try {
-          responsePayload = msg.content ? JSON.parse(msg.content) : {};
-        } catch {
-          responsePayload = { result: msg.content };
-        }
-        if (
-          responsePayload === null ||
-          typeof responsePayload !== "object" ||
-          Array.isArray(responsePayload)
-        ) {
-          responsePayload = { result: responsePayload };
-        }
-        const part: GoogleContentBlock = {
-          functionResponse: {
-            // Without a name, use the name of the tool call it answers (Python uses the id).
-            name:
-              msg.name ||
-              (msg.tool_call_id && toolNamesById.get(msg.tool_call_id)) ||
-              msg.tool_call_id ||
-              "tool",
-            response: responsePayload as Record<string, unknown>,
-          },
-        };
+      } else if (msg.role === Role.TOOL) {
+        const part = toolResultPart(msg, toolNamesById);
         // Gemini wants all results of one turn's (parallel) calls in a single message.
         if (toolResults) {
           toolResults.parts.push(part);
@@ -122,12 +96,11 @@ export class GoogleProvider extends BaseProvider {
           toolResults = { role: "user", parts: [part] };
           googleMessages.push(toolResults);
         }
-        continue;
+      } else {
+        toolResults = null;
+        const googleRole = msg.role === Role.ASSISTANT ? "model" : "user";
+        googleMessages.push({ role: googleRole, parts: messageToGoogleParts(msg) });
       }
-
-      toolResults = null;
-      const googleRole = msg.role === Role.ASSISTANT ? "model" : "user";
-      googleMessages.push({ role: googleRole, parts: messageToGoogleParts(msg) });
     }
 
     const systemInstruction = systemContent ? { parts: [{ text: systemContent }] } : null;
@@ -194,24 +167,13 @@ export class GoogleProvider extends BaseProvider {
     }
 
     const usageMeta = googleResponse.usageMetadata;
-    const promptTokens = usageMeta.promptTokenCount;
-    const completionTokens = usageMeta.candidatesTokenCount;
-    const totalTokens = usageMeta.totalTokenCount || promptTokens + completionTokens;
-
-    return {
-      id: `chatcmpl-${randomUUID().replaceAll("-", "").slice(0, 8)}`,
-      object: "chat.completion",
-      created: Math.floor(Date.now() / 1000),
-      model: model ?? null,
+    return this.buildResponse({
+      model,
       choices,
-      usage: {
-        prompt_tokens: promptTokens,
-        completion_tokens: completionTokens,
-        total_tokens: totalTokens,
-      },
-      provider: this.providerName,
-      error: null,
-    };
+      promptTokens: usageMeta.promptTokenCount,
+      completionTokens: usageMeta.candidatesTokenCount,
+      totalTokens: usageMeta.totalTokenCount,
+    });
   }
 
   // ---- streaming hooks (driven by BaseProvider.stream) ----
@@ -334,6 +296,32 @@ function messageToGoogleParts(msg: Message): GoogleContentBlock[] {
     parts.push({ text: "" });
   }
   return parts;
+}
+
+/** Render a `tool` message as a Gemini `functionResponse` part. */
+function toolResultPart(msg: Message, toolNamesById: Map<string, string>): GoogleContentBlock {
+  let responsePayload: unknown;
+  try {
+    responsePayload = msg.content ? JSON.parse(msg.content) : {};
+  } catch {
+    responsePayload = { result: msg.content };
+  }
+  if (
+    responsePayload === null ||
+    typeof responsePayload !== "object" ||
+    Array.isArray(responsePayload)
+  ) {
+    responsePayload = { result: responsePayload };
+  }
+  // Without a name, use the name of the tool call it answers (Python uses the id).
+  const name =
+    msg.name ||
+    (msg.tool_call_id && toolNamesById.get(msg.tool_call_id)) ||
+    msg.tool_call_id ||
+    constants.DEFAULT_TOOL_NAME;
+  return {
+    functionResponse: { name, response: responsePayload as Record<string, unknown> },
+  };
 }
 
 /** Translate OpenAI-shaped tools into Gemini's `functionDeclarations`. */
