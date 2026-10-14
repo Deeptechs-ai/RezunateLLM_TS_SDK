@@ -129,6 +129,11 @@ describe("MaskVault", () => {
     expect(reloaded.mapping).toEqual({ [john]: "john@acme.com", [kate]: "kate@acme.com" });
   });
 
+  it("rejects data that isn't dumps() output", () => {
+    expect(() => MaskVault.loads('{"key":"not-hex"}')).toThrow();
+    expect(() => MaskVault.loads('{"map":{"[A_1f2e]":42}}')).toThrow();
+  });
+
   it("keeps vaults separate", () => {
     const userA = new MaskVault();
     const userB = new MaskVault();

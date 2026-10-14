@@ -198,10 +198,19 @@ async function* restoreStream(
   for await (const chunk of chunks) {
     if (chunk.choices.length > 0) {
       template ??= chunk;
+    } else if (carry) {
+      // A usage or error chunk: send the held text before it.
+      yield textChunk(vault.restore(carry), template);
+      carry = "";
     }
     for (const choice of chunk.choices) {
-      if (choice.delta.content !== null) {
-        const [safe, held] = splitTrailingPartial(carry + choice.delta.content);
+      const text = carry + (choice.delta.content ?? "");
+      if (choice.finish_reason !== null) {
+        // The reply ends here, so nothing is held back past the finish.
+        choice.delta.content = text ? vault.restore(text) : choice.delta.content;
+        carry = "";
+      } else if (choice.delta.content !== null) {
+        const [safe, held] = splitTrailingPartial(text);
         carry = held;
         choice.delta.content = vault.restore(safe);
       }
@@ -328,8 +337,8 @@ export type GatewayChatOptions = Partial<Omit<ChatCompleteOptions, "request">> &
   serverGuardrails?: boolean | ServerGuardrailsConfig;
   /**
    * Mask PII in the messages with restorable placeholders (from `redact` rules and the server
-   * scan), and restore the reply. A new vault is used per call unless `vault` is passed.
-   * Keep one vault per end-user; never share one across users.
+   * scan), and restore the reply. A new vault is used per call unless `vault` is passed;
+   * passing a `vault` turns this on. Keep one vault per end-user; never share one across users.
    */
   reversible?: boolean;
   /** With `reversible`, restore the reply's placeholders (default true); false keeps it masked. */
@@ -413,15 +422,27 @@ export class Gateway {
     // (Python reuses it for any provider, which sends one provider's key to another.)
     const keyFitsProvider = !this.defaultProvider || provider === this.defaultProvider;
     const apiKey = callOptions.apiKey || (keyFitsProvider ? this.defaultApiKey : null);
-    if (!provider || !apiKey) {
-      const error = new Error(
-        provider ? "API key must be specified" : "Provider must be specified",
-      );
+    const fail = (message: string) => {
+      const error = new Error(message);
       return request?.stream === true ? errorStream(error, request.model) : Promise.reject(error);
+    };
+    if (!provider || !apiKey) {
+      return fail(provider ? "API key must be specified" : "Provider must be specified");
     }
 
+    const scan = this.serverScanDirections(serverGuardrails);
+    if (scan === null) {
+      return fail("serverGuardrails directions must name at least one side");
+    }
     // A vault only for reversible calls, local to the call, so end-users never share masks.
-    const vault = reversible ? (callOptions.vault ?? new MaskVault()) : undefined;
+    // Passing a vault turns reversible masking on.
+    const vault = callOptions.vault ?? (reversible ? new MaskVault() : undefined);
+    // Streamed text is scanned and restored as one reply, so it can't keep choices apart.
+    const changesStream = scan.has(GuardrailDirection.OUTPUT) || (vault && rehydrate);
+    if (request?.stream === true && (request.n ?? 1) > 1 && changesStream) {
+      return fail("n > 1 is not supported when a streamed reply is scanned or restored");
+    }
+
     const chatOptions: ChatCompleteOptions = {
       ...callOptions,
       provider,
@@ -430,11 +451,7 @@ export class Gateway {
       guardrailsConfig: callOptions.guardrailsConfig ?? this.guardrailsConfig ?? undefined,
       vault,
     };
-    const call: GuardedCall = {
-      scan: this.serverScanDirections(serverGuardrails),
-      vault,
-      rehydrate,
-    };
+    const call: GuardedCall = { scan, vault, rehydrate };
     return request?.stream === true
       ? this.streamGuarded(chatOptions, call)
       : this.completeGuarded(chatOptions, call);
@@ -541,29 +558,36 @@ export class Gateway {
     }
   }
 
-  /** The sides to scan on a call: `true` means both, a config picks them, off means none. */
+  /**
+   * The sides to scan on a call: `true` means both, a config picks them, off means none.
+   * Returns null for a config with an empty `directions`, which would scan nothing.
+   */
   private serverScanDirections(
     callSetting: boolean | ServerGuardrailsConfig | undefined,
-  ): ReadonlySet<GuardrailDirection> {
+  ): ReadonlySet<GuardrailDirection> | null {
     const setting = callSetting ?? this.serverGuardrails;
     if (!setting) {
       return new Set();
     }
-    return new Set(setting === true ? BOTH_DIRECTIONS : (setting.directions ?? BOTH_DIRECTIONS));
+    const directions = setting === true ? BOTH_DIRECTIONS : (setting.directions ?? BOTH_DIRECTIONS);
+    return directions.length > 0 ? new Set(directions) : null;
   }
 
   /**
-   * Scan every message before it's sent; the result is written into it.
+   * Scan every message before it's sent, all at once; the result is written into it.
    * With a vault, detected PII is masked with restorable placeholders instead.
    */
   private async scanMessages(request: ChatCompletionRequest, vault?: MaskVault): Promise<void> {
-    for (const message of request.messages) {
-      if (message.content) {
-        message.content = vault
-          ? await this.serverScanReversible(message.content, vault)
-          : await this.serverScan(message.content, GuardrailDirection.INPUT);
-      }
-    }
+    // Hash placeholders don't depend on the order the scans finish in.
+    await Promise.all(
+      request.messages.map(async (message) => {
+        if (message.content) {
+          message.content = vault
+            ? await this.serverScanReversible(message.content, vault)
+            : await this.serverScan(message.content, GuardrailDirection.INPUT);
+        }
+      }),
+    );
   }
 
   /** Scan an input text and mask each detected span with its own placeholder in `vault`. */
@@ -581,7 +605,7 @@ export class Gateway {
     if (result.blocked) {
       throw new ServerGuardrailsError(direction, result.entities, result.action);
     }
-    return result.text && result.text !== text ? result.text : text;
+    return result.text || text;
   }
 
   /**

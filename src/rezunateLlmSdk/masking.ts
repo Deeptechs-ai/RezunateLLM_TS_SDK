@@ -4,6 +4,7 @@
  */
 
 import { createHmac, randomBytes } from "node:crypto";
+import { z } from "zod";
 import * as constants from "./constants";
 
 /** A detected span to mask: `start`/`end` are character positions, as the scan reports them. */
@@ -23,6 +24,15 @@ export class MaskingError extends Error {
 
 /** A full placeholder: an upper-case tag, then lower-case hex digits. */
 const PLACEHOLDER_PATTERN = /\[[A-Z0-9_]+_[0-9a-f]+\]/g;
+
+/** What `MaskVault.dumps()` writes: the key in hex and the placeholder -> original map. */
+const VaultDataSchema = z.object({
+  key: z
+    .string()
+    .regex(/^[0-9a-f]+$/)
+    .optional(),
+  map: z.record(z.string(), z.string()).default({}),
+});
 
 /** Make a placeholder tag from a label: "email address" -> "EMAIL_ADDRESS". */
 function tag(label: string): string {
@@ -134,11 +144,14 @@ export class MaskVault {
     });
   }
 
-  /** Rebuild a vault from `dumps()` output, with the same key, so values keep their placeholders. */
+  /**
+   * Rebuild a vault from `dumps()` output, with the same key, so values keep their placeholders.
+   * Throws if `data` isn't valid `dumps()` output.
+   */
   static loads(data: string): MaskVault {
-    const parsed = JSON.parse(data) as { key?: string; map?: Record<string, string> };
+    const parsed = VaultDataSchema.parse(JSON.parse(data));
     const vault = parsed.key ? new MaskVault(Buffer.from(parsed.key, "hex")) : new MaskVault();
-    for (const [token, original] of Object.entries(parsed.map ?? {})) {
+    for (const [token, original] of Object.entries(parsed.map)) {
       vault.toOriginal.set(token, original);
       vault.toPlaceholder.set(original, token);
     }

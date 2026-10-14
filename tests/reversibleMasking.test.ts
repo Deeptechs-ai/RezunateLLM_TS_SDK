@@ -90,6 +90,19 @@ describe("reversible masking through the Gateway", () => {
     expect(result.choices[0]?.message.content).toBe("Your number 123-45-6789 is on file.");
   });
 
+  it("turns reversible masking on when a vault is passed", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetch = mockFetch(anthropicReplyWith(`Your number ${SSN} is on file.`));
+
+    const result = await gateway({ guardrailsConfig: redactConfig() }).chatComplete(
+      request("My SSN is 123-45-6789"),
+      { vault: new MaskVault(TEST_MASK_KEY) },
+    );
+
+    expect(sentBody(fetch)).toContain(SSN);
+    expect(result.choices[0]?.message.content).toBe("Your number 123-45-6789 is on file.");
+  });
+
   it("keeps the static masking when reversible is off", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const fetch = mockFetch(anthropicReplyWith("noted [SSN]"));
@@ -183,7 +196,8 @@ describe("reversible masking through the Gateway", () => {
     expect(result.choices[0]?.message.content).toBe("Confirmed john@acme.com.");
   });
 
-  it("restores a streamed reply, even with a placeholder split across chunks", async () => {
+  /** Stream these Anthropic text pieces, then the finish, through a reversible call. */
+  async function streamReversible(...texts: string[]) {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const textDelta = (text: string) =>
       sseEvent("content_block_delta", { index: 0, delta: { type: "text_delta", text } });
@@ -192,8 +206,7 @@ describe("reversible masking through the Gateway", () => {
         sseEvent("message_start", {
           message: { id: "m", model: "claude-sonnet-4-20250514", usage: { input_tokens: 5 } },
         }),
-        textDelta(`Number ${SSN.slice(0, 4)}`),
-        textDelta(`${SSN.slice(4)} noted.`),
+        ...texts.map(textDelta),
         sseEvent("message_delta", {
           delta: { stop_reason: "end_turn" },
           usage: { output_tokens: 6 },
@@ -209,9 +222,42 @@ describe("reversible masking through the Gateway", () => {
     )) {
       chunks.push(chunk);
     }
+    return chunks;
+  }
 
-    const text = chunks.map((c) => c.choices[0]?.delta.content ?? "").join("");
-    expect(text).toBe("Number 123-45-6789 noted.");
+  const streamedText = (chunks: ChatCompletionChunk[]) =>
+    chunks.map((c) => c.choices[0]?.delta.content ?? "").join("");
+
+  it("restores a streamed reply, even with a placeholder split across chunks", async () => {
+    const chunks = await streamReversible(`Number ${SSN.slice(0, 4)}`, `${SSN.slice(4)} noted.`);
+
+    expect(streamedText(chunks)).toBe("Number 123-45-6789 noted.");
+  });
+
+  it("sends held-back text before the finish, not after it", async () => {
+    const chunks = await streamReversible("Cut off at [SS");
+
+    const finish = chunks.findIndex((c) => c.choices[0]?.finish_reason);
+    expect(streamedText(chunks.slice(0, finish + 1))).toBe("Cut off at [SS");
+    expect(streamedText(chunks.slice(finish + 1))).toBe("");
+  });
+
+  it("rejects a streamed n > 1 reply that would be restored", async () => {
+    const fetch = mockFetch();
+
+    const chunks: ChatCompletionChunk[] = [];
+    for await (const chunk of gateway().chatComplete(
+      { ...request("hi"), n: 2, stream: true },
+      { reversible: true },
+    )) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.error?.message).toBe(
+      "n > 1 is not supported when a streamed reply is scanned or restored",
+    );
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("keeps concurrent calls on one shared Gateway apart", async () => {

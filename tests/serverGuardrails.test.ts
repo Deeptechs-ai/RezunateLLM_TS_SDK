@@ -165,6 +165,16 @@ describe("server scan directions", () => {
     expect(result.choices[0]?.message.content).toBe("Output email bob@example.com");
     expect(fetch).toHaveBeenCalledTimes(2);
   });
+
+  // New in the TS port: Python scans nothing for an empty list, without a warning.
+  it("rejects an empty list of directions instead of scanning nothing", async () => {
+    const fetch = mockFetch();
+
+    await expect(gateway({ directions: [] }).chatComplete(request())).rejects.toThrow(
+      "serverGuardrails directions must name at least one side",
+    );
+    expect(fetch).not.toHaveBeenCalled();
+  });
 });
 
 describe("the scan request", () => {
@@ -286,12 +296,30 @@ describe("server scan of streamed replies", () => {
 
     const chunks = await streamWithOutputScan();
 
-    // The first scan waits for 200 characters and a sentence end; the rest goes at the finish.
-    expect(scanned).toEqual([`${long}. Mail jo@a.co now.`, " Bye"]);
+    // The first scan waits for 200 characters and a sentence end (". "); the rest goes at the finish.
+    expect(scanned).toEqual([`${long}. `, "Mail jo@a.co now. Bye"]);
     const text = chunks.map((c) => c.choices[0]?.delta.content ?? "").join("");
     expect(text).toBe(`${long}. Mail [EMAIL] now. Bye`);
     expect(chunks.at(-2)?.choices[0]?.finish_reason).toBe("stop");
     expect(chunks.at(-1)?.usage).toEqual(usage);
+  });
+
+  it("never cuts the text for a scan inside an email address", async () => {
+    const long = "x".repeat(195);
+    const scanned = routedFetch(
+      [
+        piece({ content: `${long} Mail john.doe@example.` }),
+        piece({ content: "com now." }),
+        piece({}, "stop"),
+      ],
+      redactEmails,
+    );
+
+    const chunks = await streamWithOutputScan();
+
+    expect(scanned).toEqual([`${long} Mail john.doe@example.com now.`]);
+    const text = chunks.map((c) => c.choices[0]?.delta.content ?? "").join("");
+    expect(text).toBe(`${long} Mail [EMAIL] now.`);
   });
 
   it("ends the stream with an error chunk when a scanned sentence is blocked", async () => {
