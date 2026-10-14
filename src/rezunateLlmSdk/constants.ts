@@ -25,6 +25,12 @@ export const REZUNATE_LLM_TIMEOUT = 30; // seconds
 export const REZUNATE_LLM_API_VERSION = "v1";
 export const PROMPT_ENDPOINT = `/api/${REZUNATE_LLM_API_VERSION}/prompts`;
 
+// Local guardrails
+/** Env var with the path of a guardrails YAML file that is loaded automatically. */
+export const GUARDRAILS_FILE_PATH_ENV = "GUARDRAILS_FILE_PATH";
+/** Text that replaces each match of a `redact` rule that sets no `replacement`. */
+export const DEFAULT_REDACTION = "[REDACTED]";
+
 // Provider finish/stop reasons (reference lists; FINISH_REASON_MAP in models.ts translates them)
 
 /**

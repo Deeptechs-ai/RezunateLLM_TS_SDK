@@ -7,6 +7,7 @@
  */
 
 import { z } from "zod";
+import { DEFAULT_REDACTION } from "./constants";
 
 // ---- Enums ----------------------------------------------------------------------------
 
@@ -42,6 +43,23 @@ export const FinishReason = {
 } as const;
 export type FinishReason = (typeof FinishReason)[keyof typeof FinishReason];
 export const FinishReasonSchema = z.enum(FinishReason);
+
+/** Which side a guardrail checks: the text sent to the model, or the model's reply. */
+export const GuardrailDirection = {
+  INPUT: "input",
+  OUTPUT: "output",
+} as const;
+export type GuardrailDirection = (typeof GuardrailDirection)[keyof typeof GuardrailDirection];
+export const GuardrailDirectionSchema = z.enum(GuardrailDirection);
+
+/** What a guardrail rule does when its pattern matches. */
+export const GuardrailAction = {
+  BLOCK: "block",
+  FLAG: "flag",
+  REDACT: "redact",
+} as const;
+export type GuardrailAction = (typeof GuardrailAction)[keyof typeof GuardrailAction];
+export const GuardrailActionSchema = z.enum(GuardrailAction);
 
 /** Centralized mapping for all provider-specific finish reasons. */
 export const FINISH_REASON_MAP: Readonly<Record<string, FinishReason>> = {
@@ -288,3 +306,32 @@ export const PromptResponseSchema = z.object({
   updated_at: z.coerce.date(),
 });
 export type PromptResponse = z.infer<typeof PromptResponseSchema>;
+
+// ---- Guardrails -----------------------------------------------------------------------
+
+/** A guardrail rule: a JavaScript regular expression and what to do when it matches. */
+export const GuardrailRuleSchema = z.object({
+  name: z.string(),
+  pattern: z.string(),
+  description: z.string().default(""),
+  action: GuardrailActionSchema.default(GuardrailAction.BLOCK),
+  /** Text that replaces each match when `action` is `redact`. */
+  replacement: z.string().default(DEFAULT_REDACTION),
+});
+export type GuardrailRule = z.infer<typeof GuardrailRuleSchema>;
+
+/** A guardrails configuration: the rules, checked in order. */
+export const GuardrailsConfigSchema = z.object({
+  guardrails: z.array(GuardrailRuleSchema),
+});
+export type GuardrailsConfig = z.infer<typeof GuardrailsConfigSchema>;
+
+/** A rule that matched a text. */
+export interface GuardrailViolation {
+  ruleName: string;
+  ruleDescription: string;
+  direction: GuardrailDirection;
+  action: GuardrailAction;
+  /** The first text the rule's pattern matched. */
+  match: string;
+}
