@@ -61,16 +61,17 @@ describe("MaskVault", () => {
     );
   });
 
-  it("skips spans outside the text", () => {
+  // New in the TS port: Python skips such a span, so its PII would be sent unmasked.
+  it.each([
+    [8, 99],
+    [5, 5],
+    [-1, 3],
+  ])("throws MaskingError for a span outside the text (%i-%i)", (start, end) => {
     const vault = new MaskVault(TEST_MASK_KEY);
 
-    const masked = vault.maskEntities("Ali and Sara", [
-      { label: "person", start: 8, end: 12 },
-      { label: "person", start: 8, end: 99 },
-      { label: "person", start: 5, end: 5 },
-    ]);
-
-    expect(masked).toBe(`Ali and ${code("person", "Sara")}`);
+    expect(() => vault.maskEntities("Ali and Sara", [{ label: "person", start, end }])).toThrow(
+      MaskingError,
+    );
   });
 
   it("throws MaskingError on overlapping spans instead of sending them unmasked", () => {
@@ -164,5 +165,12 @@ describe("splitTrailingPartial", () => {
   it("returns complete text unchanged", () => {
     expect(splitTrailingPartial("Hello [EMAIL_7f3a] bye")).toEqual(["Hello [EMAIL_7f3a] bye", ""]);
     expect(splitTrailingPartial("no brackets")).toEqual(["no brackets", ""]);
+  });
+
+  // New in the TS port: Python holds every unclosed "[", which stalls the stream.
+  it("sends a bracket that can't become a placeholder at once", () => {
+    expect(splitTrailingPartial("Step 1 [optional")).toEqual(["Step 1 [optional", ""]);
+    const long = `[EMAIL_${"A".repeat(200)}`;
+    expect(splitTrailingPartial(`Hi ${long}`)).toEqual([`Hi ${long}`, ""]);
   });
 });

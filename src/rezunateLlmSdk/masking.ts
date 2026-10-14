@@ -24,6 +24,8 @@ export class MaskingError extends Error {
 
 /** A full placeholder: an upper-case tag, then lower-case hex digits. */
 const PLACEHOLDER_PATTERN = /\[[A-Z0-9_]+_[0-9a-f]+\]/g;
+/** The start of a placeholder that hasn't finished arriving, e.g. "[EMAIL_AD". */
+const PARTIAL_PLACEHOLDER_PATTERN = /^\[[A-Z0-9_]*[0-9a-f]*$/;
 
 /** What `MaskVault.dumps()` writes: the key in hex and the placeholder -> original map. */
 const VaultDataSchema = z.object({
@@ -89,9 +91,9 @@ export class MaskVault {
   }
 
   /**
-   * Replace detected spans in `text` with placeholders.
-   * Spans are replaced right to left so positions stay valid; spans outside the text are skipped.
-   * Throws `MaskingError` if two spans overlap, as masking them would corrupt the text.
+   * Replace detected spans in `text` with placeholders, right to left so positions stay valid.
+   * Throws `MaskingError` if a span is outside the text or two spans overlap, so PII that
+   * can't be masked is never sent. (The Python SDK skips a span outside the text.)
    */
   maskEntities(text: string, entities: Iterable<MaskSpan>): string {
     // Positions count characters as Python does (an emoji is one character, not two).
@@ -106,14 +108,15 @@ export class MaskVault {
     const length = chars.length;
     let previousStart = length;
     for (const { start, end, label } of spans) {
-      if (start >= 0 && end <= length && start < end) {
-        if (end > previousStart) {
-          throw new MaskingError(`Overlapping spans at ${start}:${end} could not be masked.`);
-        }
-        const token = this.assign(label, chars.slice(start, end).join(""));
-        chars.splice(start, end - start, token);
-        previousStart = start;
+      if (start < 0 || end > length || start >= end) {
+        throw new MaskingError(`Span ${start}:${end} is outside the text and could not be masked.`);
       }
+      if (end > previousStart) {
+        throw new MaskingError(`Overlapping spans at ${start}:${end} could not be masked.`);
+      }
+      const token = this.assign(label, chars.slice(start, end).join(""));
+      chars.splice(start, end - start, token);
+      previousStart = start;
     }
     return chars.join("");
   }
@@ -146,7 +149,8 @@ export class MaskVault {
 
   /**
    * Rebuild a vault from `dumps()` output, with the same key, so values keep their placeholders.
-   * Throws if `data` isn't valid `dumps()` output.
+   * Data without a key (older output) gets a new random key: its placeholders still restore,
+   * but new values get placeholders from the new key. Throws if `data` isn't valid output.
    */
   static loads(data: string): MaskVault {
     const parsed = VaultDataSchema.parse(JSON.parse(data));
@@ -166,14 +170,20 @@ export function unmask(text: string, vault: MaskVault): string {
 
 /**
  * Hold back a half-received placeholder while streaming.
- * When the text ends with a "[" that has no closing "]", the rest of a placeholder is probably
- * still on its way. Returns `[safe, held]`: restore `safe` now, and put `held` in front of the
- * next piece of text.
+ * When the text ends with something that can still become a placeholder (such as "[EMAIL_AD"),
+ * the rest is probably on its way. Returns `[safe, held]`: restore `safe` now, and put `held`
+ * in front of the next piece of text. Any other "[" (such as "[draft") is sent at once,
+ * unlike the Python SDK, which holds every unclosed "[" until the reply ends.
  */
 export function splitTrailingPartial(text: string): [string, string] {
   const index = text.lastIndexOf("[");
-  if (index !== -1 && !text.slice(index).includes("]")) {
-    return [text.slice(0, index), text.slice(index)];
+  const tail = text.slice(index);
+  if (
+    index !== -1 &&
+    tail.length <= constants.MASK_MAX_PARTIAL_CHARS &&
+    PARTIAL_PLACEHOLDER_PATTERN.test(tail)
+  ) {
+    return [text.slice(0, index), tail];
   }
   return [text, ""];
 }

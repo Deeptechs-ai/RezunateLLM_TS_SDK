@@ -175,6 +175,43 @@ describe("server scan directions", () => {
     );
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  // New in the TS port: Python changes each message as its scan finishes.
+  it("leaves every message unchanged when one of their scans blocks", async () => {
+    mockFetch(
+      scanReply({ action: "redact", text: "Hi [PERSON]" }),
+      scanReply({ action: "block", blocked: true }),
+    );
+    const sent = {
+      ...request(),
+      messages: [
+        { role: "user" as const, content: "Hi Maria" },
+        { role: "user" as const, content: "SSN 123-45-6789" },
+      ],
+    };
+
+    await expect(gateway({ directions: ["input"] }).chatComplete(sent)).rejects.toThrow(
+      ServerGuardrailsError,
+    );
+    expect(sent.messages.map((m) => m.content)).toEqual(["Hi Maria", "SSN 123-45-6789"]);
+  });
+
+  it("reports a masking failure in a stream as a guardrail error", async () => {
+    mockFetch(
+      scanReply({ entities: [{ text: "x", label: "person", score: 1, start: 0, end: 99 }] }),
+    );
+
+    const chunks: ChatCompletionChunk[] = [];
+    for await (const chunk of gateway({ directions: ["input"] }).chatComplete(
+      { ...request(), stream: true },
+      { reversible: true },
+    )) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.error?.type).toBe("guardrail_error");
+  });
 });
 
 describe("the scan request", () => {

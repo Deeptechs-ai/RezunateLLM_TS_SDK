@@ -42,6 +42,10 @@ export const STREAM_SCAN_MAX_CHARS = 600;
 export const MASK_SUFFIX_DIGITS = 4;
 /** Size of a vault's random placeholder key. */
 export const MASK_KEY_BYTES = 32;
+/** A streamed "[..." longer than this can't be a placeholder, so it isn't held back. */
+export const MASK_MAX_PARTIAL_CHARS = 200;
+/** How many messages are scanned by the hosted service at the same time. */
+export const SERVER_SCAN_CONCURRENCY = 5;
 
 // Local guardrails
 /** Env var with the path of a guardrails YAML file that is loaded automatically. */

@@ -9,7 +9,7 @@ import {
   GuardrailsError,
   ServerGuardrailsError,
 } from "./guardrails";
-import { MaskVault, splitTrailingPartial } from "./masking";
+import { MaskingError, MaskVault, splitTrailingPartial } from "./masking";
 import {
   type ChatCompletionChunk,
   type ChatCompletionRequest,
@@ -291,8 +291,30 @@ function splitForScan(text: string): [string, string] {
   return [text, ""];
 }
 
+/** `fn` for every item, with at most `limit` running at once; results keep the items' order. */
+async function mapLimited<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = [];
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 function errorType(error: unknown): string {
-  if (error instanceof GuardrailsError || error instanceof ServerGuardrailsError) {
+  if (
+    error instanceof GuardrailsError ||
+    error instanceof ServerGuardrailsError ||
+    error instanceof MaskingError
+  ) {
     return "guardrail_error";
   }
   return error instanceof RouterAPIError ? "api_error" : "invalid_request_error";
@@ -574,38 +596,41 @@ export class Gateway {
   }
 
   /**
-   * Scan every message before it's sent, all at once; the result is written into it.
+   * Scan every message before it's sent, a few at a time; the result is written into it.
    * With a vault, detected PII is masked with restorable placeholders instead.
+   * Messages are changed only once every scan has passed, so an error leaves them as they were.
    */
   private async scanMessages(request: ChatCompletionRequest, vault?: MaskVault): Promise<void> {
-    // Hash placeholders don't depend on the order the scans finish in.
-    await Promise.all(
-      request.messages.map(async (message) => {
-        if (message.content) {
-          message.content = vault
-            ? await this.serverScanReversible(message.content, vault)
-            : await this.serverScan(message.content, GuardrailDirection.INPUT);
-        }
-      }),
+    const messages = request.messages.filter((message) => message.content);
+    const results = await mapLimited(messages, constants.SERVER_SCAN_CONCURRENCY, (message) =>
+      this.checkedScan(message.content ?? "", GuardrailDirection.INPUT),
     );
-  }
-
-  /** Scan an input text and mask each detected span with its own placeholder in `vault`. */
-  private async serverScanReversible(text: string, vault: MaskVault): Promise<string> {
-    const result = await this.guardrails.scan(text);
-    if (result.blocked) {
-      throw new ServerGuardrailsError(GuardrailDirection.INPUT, result.entities, result.action);
-    }
-    return result.entities.length > 0 ? vault.maskEntities(text, result.entities) : text;
+    // Masked in message order, so a rare placeholder clash always resolves the same way.
+    const texts = messages.map((message, i) => {
+      const text = message.content ?? "";
+      const result = results[i];
+      if (!result) {
+        return text;
+      }
+      return vault ? vault.maskEntities(text, result.entities) : result.text || text;
+    });
+    messages.forEach((message, i) => {
+      message.content = texts[i] ?? message.content;
+    });
   }
 
   /** Scan one text with the hosted service: throws if it's blocked, else returns the result. */
-  private async serverScan(text: string, direction: GuardrailDirection): Promise<string> {
+  private async checkedScan(text: string, direction: GuardrailDirection): Promise<ScanResponse> {
     const result = await this.guardrails.scan(text);
     if (result.blocked) {
       throw new ServerGuardrailsError(direction, result.entities, result.action);
     }
-    return result.text || text;
+    return result;
+  }
+
+  /** Scan one text and return the server's redacted text, or `text` when nothing changed. */
+  private async serverScan(text: string, direction: GuardrailDirection): Promise<string> {
+    return (await this.checkedScan(text, direction)).text || text;
   }
 
   /**
