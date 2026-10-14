@@ -9,9 +9,11 @@ import { z } from "zod";
 
 /** A tool call, in the same shape as OpenAI's (DashScope also sends an `index`). */
 export const QwenToolCallSchema = z.looseObject({
+  // Streamed pieces of one call share `index`; later pieces may have no id, type or name.
+  index: z.number().int().nullish(),
   id: z.string().default(""),
-  type: z.literal("function").default("function"),
-  function: z.object({ name: z.string(), arguments: z.string().default("") }),
+  type: z.literal("function").nullish(),
+  function: z.object({ name: z.string().nullish(), arguments: z.string().nullish() }).nullish(),
 });
 export type QwenToolCall = z.infer<typeof QwenToolCallSchema>;
 

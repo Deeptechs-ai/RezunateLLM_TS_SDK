@@ -21,6 +21,7 @@ describe("package entry point", () => {
         "FunctionCallSchema",
         "FunctionDefinitionSchema",
         "MessageSchema",
+        "ToolCallDeltaSchema",
         "ToolCallSchema",
         "ToolChoiceFunctionSchema",
         "ToolChoiceOptionSchema",

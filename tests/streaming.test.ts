@@ -1114,3 +1114,293 @@ describe("stream error details", () => {
     expect(chunk?.error?.message).toContain('Invalid Anthropic "message_delta" event');
   });
 });
+
+/** Join streamed tool-call pieces by index, the way a caller would. */
+function joinToolCalls(chunks: ChatCompletionChunk[]) {
+  const calls: { id?: string | null; name?: string | null; arguments: string }[] = [];
+  for (const chunk of chunks) {
+    for (const piece of chunk.choices[0]?.delta.tool_calls ?? []) {
+      calls[piece.index] ??= { arguments: "" };
+      const call = calls[piece.index] as {
+        id?: string | null;
+        name?: string | null;
+        arguments: string;
+      };
+      call.id ??= piece.id;
+      call.name ??= piece.function?.name;
+      call.arguments += piece.function?.arguments ?? "";
+    }
+  }
+  return calls;
+}
+
+describe("stream tool calls", () => {
+  it("passes OpenAI's streamed tool-call pieces through", async () => {
+    mockStreamFetch({
+      pieces: [
+        sseData(
+          sdkChunk({
+            role: "assistant",
+            tool_calls: [
+              {
+                index: 0,
+                id: "call_1",
+                type: "function",
+                function: { name: "get_weather", arguments: "" },
+              },
+            ],
+          }),
+          sdkChunk({ tool_calls: [{ index: 0, function: { arguments: '{"city":' } }] }),
+          sdkChunk({ tool_calls: [{ index: 0, function: { arguments: '"Paris"}' } }] }),
+          sdkChunk({}, "tool_calls"),
+        ),
+        DONE,
+      ],
+    });
+
+    const chunks = await collect(streamingProvider("openai").stream(hiRequest("gpt-4")));
+
+    expect(chunks[0]?.choices[0]?.delta.tool_calls).toEqual([
+      {
+        index: 0,
+        id: "call_1",
+        type: "function",
+        function: { name: "get_weather", arguments: "" },
+      },
+    ]);
+    expect(joinToolCalls(chunks)).toEqual([
+      { id: "call_1", name: "get_weather", arguments: '{"city":"Paris"}' },
+    ]);
+    expect(chunks.at(-1)?.choices[0]?.finish_reason).toBe("tool_calls");
+  });
+
+  it("accepts a whole tool call in one chunk without an index (Grok)", async () => {
+    mockStreamFetch({
+      pieces: [
+        sseData(
+          sdkChunk({
+            tool_calls: [
+              {
+                id: "call_9",
+                type: "function",
+                function: { name: "get_weather", arguments: '{"city":"Paris"}' },
+              },
+            ],
+          }),
+          sdkChunk({}, "tool_calls"),
+        ),
+        DONE,
+      ],
+    });
+
+    const chunks = await collect(streamingProvider("grok").stream(hiRequest("grok-3-mini")));
+
+    expect(chunks[0]?.choices[0]?.delta.tool_calls?.[0]?.index).toBe(0);
+    expect(joinToolCalls(chunks)).toEqual([
+      { id: "call_9", name: "get_weather", arguments: '{"city":"Paris"}' },
+    ]);
+  });
+
+  /** Anthropic events for one tool_use block at `block`, with its JSON split into pieces. */
+  function anthropicToolBlock(block: number, id: string, city: string): string[] {
+    return [
+      sseEvent("content_block_start", {
+        index: block,
+        content_block: { type: "tool_use", id, name: "get_weather", input: {} },
+      }),
+      sseEvent("content_block_delta", {
+        index: block,
+        delta: { type: "input_json_delta", partial_json: "" },
+      }),
+      sseEvent("content_block_delta", {
+        index: block,
+        delta: { type: "input_json_delta", partial_json: '{"city":' },
+      }),
+      sseEvent("content_block_delta", {
+        index: block,
+        delta: { type: "input_json_delta", partial_json: `"${city}"}` },
+      }),
+      sseEvent("content_block_stop", { index: block }),
+    ];
+  }
+
+  it("turns Anthropic tool_use events into OpenAI tool-call pieces", async () => {
+    mockStreamFetch({
+      pieces: [
+        anthropicStream()[0] ?? "",
+        sseEvent("content_block_start", { index: 0, content_block: { type: "text", text: "" } }),
+        sseEvent("content_block_delta", {
+          index: 0,
+          delta: { type: "text_delta", text: "Let me check." },
+        }),
+        sseEvent("content_block_stop", { index: 0 }),
+        ...anthropicToolBlock(1, "toolu_1", "Paris"),
+        sseEvent("message_delta", {
+          delta: { stop_reason: "tool_use" },
+          usage: { output_tokens: 9 },
+        }),
+        sseEvent("message_stop", {}),
+      ],
+    });
+
+    const chunks = await collect(streamingProvider("anthropic").stream(anthropicRequest()));
+
+    expect(chunks.map((c) => c.choices[0]?.delta.content ?? "").join("")).toBe("Let me check.");
+    expect(
+      chunks.find((c) => c.choices[0]?.delta.tool_calls)?.choices[0]?.delta.tool_calls,
+    ).toEqual([
+      {
+        index: 0,
+        id: "toolu_1",
+        type: "function",
+        function: { name: "get_weather", arguments: "" },
+      },
+    ]);
+    expect(joinToolCalls(chunks)).toEqual([
+      { id: "toolu_1", name: "get_weather", arguments: '{"city":"Paris"}' },
+    ]);
+    expect(chunks.at(-1)?.choices[0]?.finish_reason).toBe("tool_calls");
+    expect(chunks.at(-1)?.choices[0]?.provider_finish_reason).toBe("tool_use");
+  });
+
+  it("numbers parallel Anthropic tool calls 0 and 1", async () => {
+    mockStreamFetch({
+      pieces: [
+        anthropicStream()[0] ?? "",
+        ...anthropicToolBlock(0, "toolu_a", "Paris"),
+        ...anthropicToolBlock(1, "toolu_b", "Tokyo"),
+        sseEvent("message_delta", {
+          delta: { stop_reason: "tool_use" },
+          usage: { output_tokens: 20 },
+        }),
+        sseEvent("message_stop", {}),
+      ],
+    });
+
+    const chunks = await collect(streamingProvider("anthropic").stream(anthropicRequest()));
+
+    expect(joinToolCalls(chunks)).toEqual([
+      { id: "toolu_a", name: "get_weather", arguments: '{"city":"Paris"}' },
+      { id: "toolu_b", name: "get_weather", arguments: '{"city":"Tokyo"}' },
+    ]);
+  });
+
+  /** A Gemini frame with function calls for the given cities. */
+  function geminiCallFrame(cities: string[], finishReason?: string) {
+    return {
+      candidates: [
+        {
+          content: {
+            role: "model",
+            parts: cities.map((city) => ({
+              functionCall: { name: "get_weather", args: { city } },
+            })),
+          },
+          ...(finishReason ? { finishReason } : {}),
+        },
+      ],
+    };
+  }
+
+  it("turns a Gemini functionCall into one complete tool-call piece", async () => {
+    mockStreamFetch({ pieces: [sseData(geminiCallFrame(["Paris"], "STOP"))] });
+
+    const chunks = await collect(streamingProvider("google").stream(geminiRequest()));
+
+    const piece = chunks[0]?.choices[0]?.delta.tool_calls?.[0];
+    expect(piece).toMatchObject({
+      index: 0,
+      type: "function",
+      function: { name: "get_weather", arguments: '{"city":"Paris"}' },
+    });
+    expect(piece?.id).toMatch(/^call_[0-9a-f]{8}$/);
+    // Gemini says "STOP" for a tool call; finish_reason still tells the caller to run it.
+    expect(chunks.at(-1)?.choices[0]?.finish_reason).toBe("tool_calls");
+    expect(chunks.at(-1)?.choices[0]?.provider_finish_reason).toBe("STOP");
+  });
+
+  it("numbers parallel Gemini calls across frames 0 and 1", async () => {
+    mockStreamFetch({
+      pieces: [sseData(geminiCallFrame(["Paris"]), geminiCallFrame(["Tokyo"], "STOP"))],
+    });
+
+    const chunks = await collect(streamingProvider("google").stream(geminiRequest()));
+
+    expect(joinToolCalls(chunks).map((c) => [c.name, c.arguments])).toEqual([
+      ["get_weather", '{"city":"Paris"}'],
+      ["get_weather", '{"city":"Tokyo"}'],
+    ]);
+    expect(chunks.at(-1)?.choices[0]?.finish_reason).toBe("tool_calls");
+  });
+
+  it("keeps a non-STOP Gemini finish reason after a tool call", async () => {
+    mockStreamFetch({
+      pieces: [sseData(geminiCallFrame(["Paris"]), geminiCallFrame([], "MAX_TOKENS"))],
+    });
+
+    const chunks = await collect(streamingProvider("google").stream(geminiRequest()));
+
+    // A cut-off call must not look like a finished one.
+    expect(chunks.at(-1)?.choices[0]?.finish_reason).toBe("length");
+    expect(chunks.at(-1)?.choices[0]?.provider_finish_reason).toBe("MAX_TOKENS");
+  });
+
+  /** A DashScope stream frame carrying one tool-call piece, in DashScope's text format. */
+  function qwenToolFrame(piece: object, finishReason = "null"): string {
+    const data = {
+      output: {
+        choices: [
+          {
+            message: { role: "assistant", content: "", tool_calls: [piece] },
+            finish_reason: finishReason,
+          },
+        ],
+      },
+      usage: { input_tokens: 20, output_tokens: 5, total_tokens: 25 },
+      request_id: "req-1",
+    };
+    return `id:1\nevent:result\n:HTTP_STATUS/200\ndata:${JSON.stringify(data)}\n\n`;
+  }
+
+  it("turns DashScope's streamed tool calls into OpenAI tool-call pieces", async () => {
+    mockStreamFetch({
+      pieces: [
+        qwenToolFrame({
+          index: 0,
+          id: "call_q1",
+          type: "function",
+          function: { name: "get_weather", arguments: '{"city":' },
+        }),
+        qwenToolFrame({ index: 0, id: "", function: { arguments: '"Paris"}' } }, "tool_calls"),
+      ],
+    });
+
+    const chunks = await collect(streamingProvider("qwen").stream(hiRequest("qwen-plus")));
+
+    expect(chunks[1]?.choices[0]?.delta.tool_calls).toEqual([
+      { index: 0, function: { arguments: '"Paris"}' } },
+    ]);
+    expect(joinToolCalls(chunks)).toEqual([
+      { id: "call_q1", name: "get_weather", arguments: '{"city":"Paris"}' },
+    ]);
+    expect(chunks.at(-1)?.choices[0]?.finish_reason).toBe("tool_calls");
+  });
+
+  it("passes tool_stream to DashScope when it is set", async () => {
+    const fetch = mockStreamFetch({ pieces: [] });
+
+    await collect(
+      streamingProvider("qwen").stream(
+        ChatCompletionRequestSchema.parse({
+          model: "qwen-plus",
+          messages: [{ role: "user", content: "Hi" }],
+          stream: true,
+          tool_stream: true,
+        }),
+      ),
+    );
+
+    const body = JSON.parse(String(fetch.mock.calls[0]?.[1]?.body));
+    expect(body.parameters).toMatchObject({ incremental_output: true, tool_stream: true });
+  });
+});

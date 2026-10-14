@@ -391,6 +391,27 @@ describe("Gemini tool calls", () => {
     expect(result.choices[0]?.finish_reason).toBe("tool_calls");
     expect(result.choices[0]?.provider_finish_reason).toBe("STOP");
   });
+
+  // New in the TS port: Python reports tool_calls for any reason once a call is present.
+  it("keeps a non-STOP finish reason when the reply has a tool call", () => {
+    const result = google().transformResponse(
+      {
+        candidates: [
+          {
+            content: {
+              role: "model",
+              parts: [{ functionCall: { name: "get_weather", args: { city: "Tokyo" } } }],
+            },
+            finishReason: "MAX_TOKENS",
+          },
+        ],
+      },
+      "gemini-2.5-flash",
+    );
+
+    expect(result.choices[0]?.finish_reason).toBe("length");
+    expect(result.choices[0]?.provider_finish_reason).toBe("MAX_TOKENS");
+  });
 });
 
 // New in the TS port: the Python SDK drops tools on Qwen.

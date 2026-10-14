@@ -107,6 +107,16 @@ export type AnthropicResponse = z.infer<typeof AnthropicResponseSchema>;
 
 /** The fields we read from Anthropic stream events; anything else is ignored. */
 export const AnthropicStreamEventSchema = z.looseObject({
+  /** Position of the content block this event belongs to. */
+  index: z.number().int().nullish(),
+  /** Sent with content_block_start; a tool block has its id and name here. */
+  content_block: z
+    .looseObject({
+      type: z.string().nullish(),
+      id: z.string().nullish(),
+      name: z.string().nullish(),
+    })
+    .nullish(),
   message: z
     .looseObject({
       id: z.string().nullish(),
@@ -118,6 +128,7 @@ export const AnthropicStreamEventSchema = z.looseObject({
     .looseObject({
       type: z.string().nullish(),
       text: z.string().nullish(),
+      partial_json: z.string().nullish(),
       stop_reason: z.string().nullish(),
     })
     .nullish(),
