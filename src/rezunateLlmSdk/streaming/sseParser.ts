@@ -22,17 +22,16 @@ export async function* readLines(body: AsyncIterable<Uint8Array>): AsyncGenerato
 
   for await (const bytes of body) {
     const text = decoder.decode(bytes, { stream: true });
-    // Split only when a line can have ended, so a very long line is not re-split on every piece.
-    if (!LINE_BREAK.test(text) && !buffer.endsWith("\r")) {
-      buffer += text;
-      continue;
-    }
+    const lineMayHaveEnded = LINE_BREAK.test(text) || buffer.endsWith("\r");
     buffer += text;
-    // A trailing "\r" may be the first half of "\r\n", so keep it until more text arrives.
-    const end = buffer.endsWith("\r") ? buffer.length - 1 : buffer.length;
-    const lines = buffer.slice(0, end).split(LINE_BREAK);
-    buffer = (lines.pop() ?? "") + buffer.slice(end);
-    yield* lines;
+    // Split only when a line can have ended, so a very long line is not re-split on every piece.
+    if (lineMayHaveEnded) {
+      // A trailing "\r" may be the first half of "\r\n", so keep it until more text arrives.
+      const end = buffer.endsWith("\r") ? buffer.length - 1 : buffer.length;
+      const lines = buffer.slice(0, end).split(LINE_BREAK);
+      buffer = (lines.pop() ?? "") + buffer.slice(end);
+      yield* lines;
+    }
   }
 
   buffer += decoder.decode();
@@ -46,6 +45,16 @@ function flush(event: string, dataBuf: string[]): SSEEvent | null {
     return null;
   }
   return { event: event || "message", data: dataBuf.join("\n") };
+}
+
+/** Split "field: value" into its parts; one leading space is dropped from the value. */
+function splitField(line: string): [string, string] {
+  const colon = line.indexOf(":");
+  if (colon === -1) {
+    return [line, ""];
+  }
+  const value = line.slice(colon + 1);
+  return [line.slice(0, colon), value.startsWith(" ") ? value.slice(1) : value];
 }
 
 /**
@@ -67,28 +76,15 @@ export async function* parseSseLines(
       }
       event = "";
       dataBuf = [];
-      continue;
-    }
-    if (line.startsWith(":")) {
-      continue;
-    }
-
-    let field = line;
-    let value = "";
-    const colon = line.indexOf(":");
-    if (colon !== -1) {
-      field = line.slice(0, colon);
-      value = line.slice(colon + 1);
-      if (value.startsWith(" ")) {
-        value = value.slice(1);
+    } else if (!line.startsWith(":")) {
+      const [field, value] = splitField(line);
+      if (field === "event") {
+        event = value;
+      } else if (field === "data") {
+        dataBuf.push(value);
       }
+      // id, retry, and unknown fields ignored
     }
-    if (field === "event") {
-      event = value;
-    } else if (field === "data") {
-      dataBuf.push(value);
-    }
-    // id, retry, and unknown fields ignored
   }
 
   const out = flush(event, dataBuf);
