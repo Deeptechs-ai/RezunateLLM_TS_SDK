@@ -257,19 +257,21 @@ function withoutText(chunk: ChatCompletionChunk): ChatCompletionChunk {
 }
 
 /**
- * Whether a chunk carries more than text and must be passed on: a role, a finish reason,
- * usage, an error, or tool-call pieces (which the Python SDK's streams don't have).
+ * Whether a chunk ends the collected text and must be passed on: a finish reason, usage, an
+ * error, or tool-call pieces (which the Python SDK's streams don't have).
  */
 function hasSignal(chunk: ChatCompletionChunk): boolean {
   if (chunk.choices.length === 0 || chunk.error !== null) {
     return true;
   }
   return chunk.choices.some(
-    (choice) =>
-      choice.finish_reason !== null ||
-      choice.delta.role !== null ||
-      (choice.delta.tool_calls?.length ?? 0) > 0,
+    (choice) => choice.finish_reason !== null || (choice.delta.tool_calls?.length ?? 0) > 0,
   );
+}
+
+/** Whether a chunk carries the role (the first chunk; Gemini and Qwen add text to it). */
+function hasRole(chunk: ChatCompletionChunk): boolean {
+  return chunk.choices.some((choice) => choice.delta.role !== null);
 }
 
 /**
@@ -569,6 +571,10 @@ export class Gateway {
             yield await scanned(buffer);
             buffer = "";
           }
+          yield withoutText(chunk);
+        } else if (hasRole(chunk)) {
+          // The role goes out at once; its text keeps collecting, so it isn't cut mid-word.
+          // (The Python SDK sends the collected text with the role.)
           yield withoutText(chunk);
         }
       }

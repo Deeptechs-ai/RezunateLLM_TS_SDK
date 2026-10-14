@@ -359,6 +359,26 @@ describe("server scan of streamed replies", () => {
     expect(text).toBe(`${long} Mail [EMAIL] now.`);
   });
 
+  it("keeps collecting the text of a first chunk that also carries the role", async () => {
+    // Gemini and Qwen send the role together with the first text.
+    const long = "x".repeat(195);
+    const scanned = routedFetch(
+      [
+        piece({ role: "assistant", content: `${long} Mail john.` }),
+        piece({ content: "doe@example.com now." }),
+        piece({}, "stop"),
+      ],
+      redactEmails,
+    );
+
+    const chunks = await streamWithOutputScan();
+
+    expect(scanned).toEqual([`${long} Mail john.doe@example.com now.`]);
+    expect(chunks[0]?.choices[0]?.delta.role).toBe("assistant");
+    const text = chunks.map((c) => c.choices[0]?.delta.content ?? "").join("");
+    expect(text).toBe(`${long} Mail [EMAIL] now.`);
+  });
+
   it("ends the stream with an error chunk when a scanned sentence is blocked", async () => {
     routedFetch(
       [
