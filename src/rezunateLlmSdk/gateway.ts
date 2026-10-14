@@ -158,7 +158,10 @@ export class Gateway {
     options: GatewayChatOptions = {},
   ): Promise<ChatCompletionResponse> | AsyncIterable<ChatCompletionChunk> {
     const provider = options.provider || this.defaultProvider;
-    const apiKey = options.apiKey || this.defaultApiKey;
+    // The default key belongs to the default provider; another provider needs its own key.
+    // (Python reuses it for any provider, which sends one provider's key to another.)
+    const keyFitsProvider = !this.defaultProvider || provider === this.defaultProvider;
+    const apiKey = options.apiKey || (keyFitsProvider ? this.defaultApiKey : null);
     if (!provider || !apiKey) {
       const error = new Error(
         provider ? "API key must be specified" : "Provider must be specified",

@@ -272,6 +272,34 @@ describe("Gateway class", () => {
     ).rejects.toThrow("API key must be specified");
   });
 
+  // New in the TS port: Python sends the default key to any provider.
+  it("does not send the default key to another provider", async () => {
+    const fetch = mockFetch({ json: anthropicResponse() });
+    const gateway = new Gateway({ defaultProvider: "openai", defaultApiKey: mockApiKey });
+
+    await expect(
+      gateway.chatComplete(hiRequest("claude-haiku-4-5"), { provider: "anthropic" }),
+    ).rejects.toThrow("API key must be specified");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("does not send the default key to another provider when streaming", async () => {
+    const fetch = mockFetch({ json: anthropicResponse() });
+    const gateway = new Gateway({ defaultProvider: "openai", defaultApiKey: mockApiKey });
+
+    const chunks = [];
+    for await (const chunk of gateway.chatComplete(
+      { ...hiRequest("claude-haiku-4-5"), stream: true },
+      { provider: "anthropic" },
+    )) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.error?.message).toBe("API key must be specified");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("lists every provider", () => {
     expect(new Gateway().providers).toEqual(getAvailableProviders());
   });
