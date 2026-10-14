@@ -14,9 +14,9 @@ Unified TypeScript SDK for chat completions across multiple AI providers, using 
 | Organization-level API keys (`organization`, `project`, `workspaceId`) | ✅ Done |
 | Streaming, with the same retries and error rule for all providers | ✅ Done |
 | Tool calls (all providers, normal chat and streaming) | ✅ Done |
-| Prompts (fetch and render saved prompts) | ⏳ Planned |
+| Prompts (fetch and render prompts saved on the Rezunate website) | ✅ Done |
 | Guardrails (local rules and server-side PII masking) | ⏳ Planned |
-| `Gateway` class | ⏳ Planned |
+| `Gateway` class (defaults, prompts and chat; guardrail options come with guardrails) | ✅ Done |
 | `rezunate-guard` CLI | ⏳ Planned |
 
 ## Requirements
@@ -257,6 +257,62 @@ await chatComplete({
 });
 ```
 
+## The Gateway and prompts
+
+### The Gateway
+
+`Gateway` remembers your settings, so you don't pass them on every call:
+
+```ts
+import { Gateway } from "rezunate-llm-sdk";
+
+const gateway = new Gateway({
+  defaultProvider: "openai",
+  defaultApiKey: process.env.OPENAI_API_KEY,
+  rezunateLlmApiKey: process.env.REZUNATE_LLM_API_KEY, // only needed for prompts
+});
+
+const response = await gateway.chatComplete({ model: "gpt-4o-mini", messages });
+
+// Use another provider for one call:
+await gateway.chatComplete(
+  { model: "claude-haiku-4-5", messages },
+  { provider: "anthropic", apiKey: process.env.ANTHROPIC_API_KEY },
+);
+```
+
+`gateway.chatComplete` works like `chatComplete` (streaming, tool calls, the same error rule). Without a provider or API key it throws `Provider must be specified` / `API key must be specified` (with `stream: true`, these come as an error chunk). The Rezunate client is created on first use, so chat alone needs no Rezunate key. Guardrail options will be added to the Gateway with the guardrails feature.
+
+### Prompts
+
+Write prompts on the [Rezunate website](https://rezunatellm.com) (Dashboard → Prompts), with `{{variable}}` placeholders. Each prompt gets a `slug_id` (for example `customer_support_reply_0nqr73`) and a version that increases with every edit. The SDK fetches a prompt by its `slug_id` and fills in the placeholders, so prompts can change without changing code.
+
+You need a Rezunate API key (Dashboard → API Keys). Pass it as `rezunateLlmApiKey` (as above), or set the `REZUNATE_LLM_API_KEY` environment variable. With the `gateway` from above:
+
+```ts
+const systemPrompt = await gateway.getPrompt("customer_support_reply_0nqr73", {
+  company_name: "Acme",
+  customer_name: "Ali",
+  customer_message: "My order hasn't arrived yet.",
+  tone: "friendly",
+  max_words: "80",
+});
+
+const reply = await gateway.chatComplete({
+  model: "gpt-4o-mini",
+  messages: [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: "Where is my order?" },
+  ],
+});
+```
+
+- Without a version, the prompt's current version is used; pass one to pin it: `gateway.getPrompt(slug, variables, 1)`.
+- A placeholder without a value throws `Missing template variables: …`; extra values are ignored.
+- A failed request throws `RouterAPIError` with the server's message and `statusCode` (for example `Prompt not found`, 404). Prompts follow the "invalid request throws" side of the [error rule](#errors).
+
+The same steps are available on their own: `new RouterClient({ apiKey })`, `getPrompt(client, slugId, version)` and `renderPrompt(content, variables)`.
+
 ## Try it locally (for testers)
 
 The package is not on npm yet. To test it the way a user would, build it, pack it, and install it in a separate folder:
@@ -306,7 +362,10 @@ Before every commit, a pre-commit hook runs Biome on the staged files, the type 
 src/
 └── rezunateLlmSdk/          # the library (rezunate_llm_sdk/ in Python)
     ├── index.ts             # public exports
-    ├── gateway.ts           # chatComplete()
+    ├── gateway.ts           # chatComplete() and the Gateway class
+    ├── client.ts            # RouterClient for the Rezunate LLM API
+    ├── api.ts               # Rezunate LLM API endpoints (getPrompt)
+    ├── prompts.ts           # renderPrompt()
     ├── models.ts            # request/response models (zod)
     ├── constants.ts
     ├── providers/           # one file per provider, plus base, factory and endpoints
