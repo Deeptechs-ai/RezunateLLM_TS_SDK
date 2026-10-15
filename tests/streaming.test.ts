@@ -1294,6 +1294,11 @@ describe("stream tool calls", () => {
           index: 0,
           content_block: { type: "tool_use", id: "toolu_t", name: "get_time", input: {} },
         }),
+        // Real streams send one empty piece for a tool with no inputs.
+        sseEvent("content_block_delta", {
+          index: 0,
+          delta: { type: "input_json_delta", partial_json: "" },
+        }),
         sseEvent("content_block_stop", { index: 0 }),
         sseEvent("message_stop", {}),
       ],
