@@ -1,0 +1,53 @@
+name: CI
+
+# Checks only (lint, type check, tests, build); it never publishes.
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24] # the supported LTS versions
+    name: check (Node ${{ matrix.node }})
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      # The package loads correctly for import, require, TypeScript and bundlers.
+      - name: Check the package exports
+        run: pnpm dlx publint
+
+      - name: Check the package types
+        run: pnpm dlx @arethetypeswrong/cli --pack .
