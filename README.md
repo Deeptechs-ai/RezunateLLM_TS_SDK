@@ -16,8 +16,8 @@ Unified TypeScript SDK for chat completions across multiple AI providers, using 
 | Tool calls (all providers, normal chat and streaming) | ✅ Done |
 | Prompts (fetch and render prompts saved on the Rezunate website) | ✅ Done |
 | Local guardrails (regex rules from a YAML file: block, flag, redact) | ✅ Done |
-| Server guardrails (hosted PII scan and reversible masking) | ⏳ Planned |
-| `Gateway` class (defaults, prompts, chat and local guardrails; server guardrail options come later) | ✅ Done |
+| Server guardrails (hosted PII scan) and reversible masking | ✅ Done |
+| `Gateway` class (defaults, prompts, chat, local and server guardrails, reversible masking) | ✅ Done |
 | `rezunate-guard` CLI | ⏳ Planned |
 
 ## Requirements
@@ -282,7 +282,7 @@ await gateway.chatComplete(
 );
 ```
 
-`gateway.chatComplete` works like `chatComplete` (streaming, tool calls, the same error rule). Without a provider or API key it throws `Provider must be specified` / `API key must be specified` (with `stream: true`, these come as an error chunk). The Rezunate client is created on first use, so chat alone needs no Rezunate key. Pass `guardrailsConfig` to apply [local guardrails](#local-guardrails) on every call; server guardrail options will come with that feature.
+`gateway.chatComplete` works like `chatComplete` (streaming, tool calls, the same error rule). Without a provider or API key it throws `Provider must be specified` / `API key must be specified` (with `stream: true`, these come as an error chunk). The Rezunate client is created on first use, so chat alone needs no Rezunate key. Pass `guardrailsConfig` to apply [local guardrails](#local-guardrails) on every call, and `serverGuardrails` for the [hosted PII scan](#server-guardrails-and-reversible-masking).
 
 ### Prompts
 
@@ -395,6 +395,70 @@ try {
 }
 ```
 
+## Server guardrails and reversible masking
+
+### Hosted PII scan
+
+The Rezunate server can find PII (names, emails, phone numbers and more) with a model, using your workspace's guardrail settings on the Rezunate website (language, entity types, action and threshold). It needs a Rezunate API key (`rezunateLlmApiKey` or `REZUNATE_LLM_API_KEY`). Turn it on in the `Gateway`:
+
+```ts
+import { Gateway, ServerGuardrailsError } from "rezunate-llm-sdk";
+
+const scanned = new Gateway({
+  defaultProvider: "openai",
+  defaultApiKey: process.env.OPENAI_API_KEY,
+  rezunateLlmApiKey: process.env.REZUNATE_LLM_API_KEY,
+  serverGuardrails: true, // scan the messages and the reply
+});
+
+try {
+  const reply = await scanned.chatComplete({ model: "gpt-4o-mini", messages });
+  console.log(reply.choices[0]?.message.content); // with PII redacted by the server
+} catch (error) {
+  if (error instanceof ServerGuardrailsError) {
+    console.log(error.message); // "Server guardrail blocked INPUT: detected US_SSN"
+  }
+}
+```
+
+- `serverGuardrails: true` scans both sides; `{ directions: ["output"] }` (or `["input"]`) scans one. It's off by default, and a call can override it: `chatComplete(request, { serverGuardrails: false })`.
+- **Messages** are scanned before they are sent, and **replies** after they arrive. When the server's action is to block, `ServerGuardrailsError` is thrown (with `direction`, `entities` and `action`); otherwise the text is replaced with the server's redacted text. As with local guardrails, your own `messages` hold the redacted text afterwards.
+- **Streams:** the reply's text is collected and scanned a few sentences at a time, so PII split across chunks is still found. This adds a short delay before text appears. A block, or a failed scan, ends the stream with an error chunk (`error.type` `"guardrail_error"` or `"api_error"`).
+- The scan can take longer when the PII service starts up; it waits up to 180 seconds. A failed scan throws `RouterAPIError`.
+- To scan any text yourself: `await gateway.guardrails.scan(text)`, which returns `{ entities, action, blocked, text }`.
+
+### Reversible masking
+
+With `reversible: true`, PII in your messages is replaced with numbered placeholders before it's sent (for example `[EMAIL_ADDRESS_1]`), and the placeholders in the reply are put back to the real values. The model never sees the PII, but your users get a complete answer. Placeholders come from the hosted scan and from local `redact` rules.
+
+```ts
+import { MaskVault } from "rezunate-llm-sdk";
+
+const masked = new Gateway({
+  defaultProvider: "openai",
+  defaultApiKey: process.env.OPENAI_API_KEY,
+  rezunateLlmApiKey: process.env.REZUNATE_LLM_API_KEY,
+  serverGuardrails: { directions: ["input"] },
+});
+
+// Sent as "My email is [EMAIL_ADDRESS_1]"; the reply comes back with the real email.
+const answer = await masked.chatComplete(
+  { model: "gpt-4o-mini", messages: [{ role: "user", content: "My email is john@acme.com" }] },
+  { reversible: true },
+);
+
+// To keep the same placeholders across a conversation, pass your own vault and save it:
+const vault = new MaskVault();
+await masked.chatComplete({ model: "gpt-4o-mini", messages }, { reversible: true, vault });
+const saved = vault.dumps(); // holds real PII: store it encrypted
+const resumed = MaskVault.loads(saved);
+```
+
+- Each call uses a new vault unless you pass one. **Keep one vault per end-user, and never share a vault between users.**
+- `rehydrate: false` keeps the reply masked; restore it later with `vault.restore(text)` or `unmask(text, vault)`.
+- Streams are restored too, even when a placeholder is split across chunks.
+- The plain `chatComplete` also accepts a `vault`: it masks the messages but leaves the reply masked.
+
 ## Try it locally (for testers)
 
 The package is not on npm yet. To test it the way a user would, build it, pack it, and install it in a separate folder:
@@ -449,6 +513,7 @@ src/
     ├── api.ts               # Rezunate LLM API endpoints (getPrompt)
     ├── prompts.ts           # renderPrompt()
     ├── guardrails.ts        # loadGuardrails() and checkGuardrails() (local guardrails)
+    ├── masking.ts           # MaskVault (reversible masking)
     ├── models.ts            # request/response models (zod)
     ├── constants.ts
     ├── providers/           # one file per provider, plus base, factory and endpoints
@@ -479,7 +544,7 @@ The TypeScript SDK is meant to behave like the Python SDK. These differences are
 15. **Gemini gets parallel tool results together.** When the model calls several tools at once, Gemini needs all their results in one message. The TS SDK groups `tool` messages that follow each other into one message; the Python SDK sends one message per result, which Gemini rejects.
 16. **Gemini accepts full JSON Schema for tools.** The TS SDK sends a tool's schema to Gemini as `parametersJsonSchema`, so keywords such as `additionalProperties` (required by OpenAI's strict mode) and `$ref` work. The Python SDK uses Gemini's older `parameters` field, which rejects them with a 400 error.
 17. **Tool calls work in streams.** With `stream: true`, tool calls arrive as pieces in `delta.tool_calls` (OpenAI's format) for every provider, and Gemini ends with `finish_reason: "tool_calls"`. In the Python SDK, stream chunks carry only text, so the tool call is lost (Gemini even ends with `"stop"`).
-18. **A guardrail block in a stream comes as an error chunk.** With `stream: true`, a `block` rule ends the stream with one error chunk (`error.type: "guardrail_error"`), like every other stream problem. The Python SDK raises `GuardrailsError` in the middle of the stream. Without `stream`, both throw `GuardrailsError`.
+18. **A guardrail block in a stream comes as an error chunk.** With `stream: true`, a local `block` rule, a server-side block or a failed scan ends the stream with one error chunk (`error.type` `"guardrail_error"`, or `"api_error"` for a failed scan), like every other stream problem. The Python SDK raises `GuardrailsError` / `ServerGuardrailsError` in the middle of the stream. Without `stream`, both SDKs throw.
 
 ## Known limitations
 
