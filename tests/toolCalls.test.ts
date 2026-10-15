@@ -392,6 +392,48 @@ describe("Gemini tool calls", () => {
     expect(result.choices[0]?.provider_finish_reason).toBe("STOP");
   });
 
+  // New in the TS port: Gemini 3 rejects a tool result whose call lost its thought signature.
+  it("keeps a tool call's thought signature and sends it back", () => {
+    const result = google().transformResponse(
+      {
+        candidates: [
+          {
+            content: {
+              role: "model",
+              parts: [
+                {
+                  functionCall: { name: "get_weather", args: { city: "Tokyo" } },
+                  thoughtSignature: "sig_abc",
+                },
+              ],
+            },
+            finishReason: "STOP",
+          },
+        ],
+      },
+      "gemini-3-flash-preview",
+    );
+    const call = result.choices[0]?.message.tool_calls?.[0];
+    expect(call?.extra_content).toEqual({ google: { thought_signature: "sig_abc" } });
+
+    const out = google().transformRequest(
+      ChatCompletionRequestSchema.parse({
+        model: "gemini-3-flash-preview",
+        messages: [
+          { role: "user", content: "Weather in Tokyo?" },
+          { role: "assistant", content: null, tool_calls: [call] },
+          { role: "tool", tool_call_id: call?.id, content: '{"temp":18}' },
+        ],
+      }),
+    );
+    expect(out.contents[1]?.parts).toEqual([
+      {
+        functionCall: { name: "get_weather", args: { city: "Tokyo" } },
+        thoughtSignature: "sig_abc",
+      },
+    ]);
+  });
+
   // New in the TS port: Python reports tool_calls for any reason once a call is present.
   it("keeps a non-STOP finish reason when the reply has a tool call", () => {
     const result = google().transformResponse(

@@ -164,7 +164,7 @@ export class AnthropicProvider extends BaseProvider {
     data: string,
     state: StreamState,
   ): ChatCompletionChunk | null {
-    if (event === "ping" || event === "content_block_stop") {
+    if (event === "ping") {
       return null;
     }
 
@@ -211,11 +211,22 @@ export class AnthropicProvider extends BaseProvider {
       const json = payload.delta?.partial_json;
       const index = state.toolIndexByBlock.get(payload.index ?? 0);
       if (payload.delta?.type === "input_json_delta" && json && index !== undefined) {
+        state.toolBlocksWithArgs.add(payload.index ?? 0);
         return this.makeChunk(state, {
           delta: { tool_calls: [{ index, function: { arguments: json } }] },
         });
       }
       return null;
+    }
+
+    if (event === "content_block_stop") {
+      // A tool with no inputs streams no JSON; send "{}" so its arguments parse, as in normal chat.
+      const index = state.toolIndexByBlock.get(payload.index ?? 0);
+      return index === undefined || state.toolBlocksWithArgs.has(payload.index ?? 0)
+        ? null
+        : this.makeChunk(state, {
+            delta: { tool_calls: [{ index, function: { arguments: "{}" } }] },
+          });
     }
 
     if (event === "message_delta") {
