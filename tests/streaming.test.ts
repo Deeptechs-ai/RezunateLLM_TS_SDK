@@ -1285,6 +1285,25 @@ describe("stream tool calls", () => {
     ]);
   });
 
+  // New in the TS port: Anthropic streams no JSON for a tool without inputs.
+  it("gives an Anthropic tool call with no inputs '{}' as its arguments", async () => {
+    mockStreamFetch({
+      pieces: [
+        anthropicStream()[0] ?? "",
+        sseEvent("content_block_start", {
+          index: 0,
+          content_block: { type: "tool_use", id: "toolu_t", name: "get_time", input: {} },
+        }),
+        sseEvent("content_block_stop", { index: 0 }),
+        sseEvent("message_stop", {}),
+      ],
+    });
+
+    const chunks = await collect(streamingProvider("anthropic").stream(anthropicRequest()));
+
+    expect(joinToolCalls(chunks)).toEqual([{ id: "toolu_t", name: "get_time", arguments: "{}" }]);
+  });
+
   /** A Gemini frame with function calls for the given cities. */
   function geminiCallFrame(cities: string[], finishReason?: string) {
     return {
