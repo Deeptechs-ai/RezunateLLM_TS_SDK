@@ -137,7 +137,7 @@ export class GoogleProvider extends BaseProvider {
           textParts.push(part.text);
         }
         if (part.functionCall) {
-          toolCalls.push(toToolCall(part.functionCall));
+          toolCalls.push(toToolCall(part.functionCall, part.thoughtSignature));
         }
       }
 
@@ -227,7 +227,14 @@ export class GoogleProvider extends BaseProvider {
     }
     // Gemini sends each function call whole, so each becomes one complete tool-call piece.
     const toolCalls = (candidate?.content?.parts ?? []).flatMap((part) =>
-      part.functionCall ? [{ index: state.toolCallCount++, ...toToolCall(part.functionCall) }] : [],
+      part.functionCall
+        ? [
+            {
+              index: state.toolCallCount++,
+              ...toToolCall(part.functionCall, part.thoughtSignature),
+            },
+          ]
+        : [],
     );
     if (toolCalls.length > 0) {
       delta.tool_calls = toolCalls;
@@ -261,12 +268,16 @@ function toolAwareFinishReason(reason: string | null, hasToolCalls: boolean): Fi
 /**
  * Turn a Gemini `functionCall` into an OpenAI tool call, for normal chat and streams.
  * The id is always made up (as in Python), even if Gemini sends one.
+ * The part's thought signature is kept in `extra_content`, so it can be sent back.
  */
-function toToolCall(functionCall: GoogleFunctionCall): ToolCall {
+function toToolCall(functionCall: GoogleFunctionCall, thoughtSignature?: string | null): ToolCall {
   return {
     id: `call_${randomUUID().replaceAll("-", "").slice(0, 8)}`,
     type: "function",
     function: { name: functionCall.name, arguments: JSON.stringify(functionCall.args ?? {}) },
+    ...(thoughtSignature
+      ? { extra_content: { google: { thought_signature: thoughtSignature } } }
+      : {}),
   };
 }
 
@@ -288,8 +299,10 @@ function messageToGoogleParts(msg: Message): GoogleContentBlock[] {
     } catch {
       args = { _raw: call.function.arguments };
     }
+    const thoughtSignature = call.extra_content?.google?.thought_signature;
     parts.push({
       functionCall: { name: call.function.name, args: args as Record<string, unknown> },
+      ...(thoughtSignature ? { thoughtSignature } : {}),
     });
   }
   if (parts.length === 0) {

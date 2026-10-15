@@ -29,6 +29,8 @@ export const GoogleContentBlockSchema = z.looseObject({
   text: z.string().nullish(),
   functionCall: GoogleFunctionCallSchema.nullish(),
   functionResponse: GoogleFunctionResponseSchema.nullish(),
+  // Sent with a `functionCall` by thinking models; must be sent back with that call.
+  thoughtSignature: z.string().nullish(),
 });
 export type GoogleContentBlock = z.infer<typeof GoogleContentBlockSchema>;
 

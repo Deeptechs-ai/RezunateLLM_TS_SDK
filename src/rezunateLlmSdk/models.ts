@@ -120,11 +120,19 @@ export const FunctionCallSchema = z.object({
 });
 export type FunctionCall = z.infer<typeof FunctionCallSchema>;
 
+// Provider data that must be sent back with a tool call, in the shape Gemini's OpenAI-compatible
+// API uses: `{ google: { thought_signature } }`. Gemini 3 rejects a tool result without it.
+
+export const ToolCallExtraContentSchema = z.looseObject({
+  google: z.looseObject({ thought_signature: z.string().nullish() }).nullish(),
+});
+
 /** A tool/function call requested by the assistant (OpenAI's `message.tool_calls[*]`). */
 export const ToolCallSchema = z.object({
   id: z.string(),
   type: z.literal("function").default("function"),
   function: FunctionCallSchema,
+  extra_content: ToolCallExtraContentSchema.nullish(),
 });
 export type ToolCall = z.infer<typeof ToolCallSchema>;
 
@@ -254,6 +262,7 @@ export const ToolCallDeltaSchema = z.object({
       arguments: z.string().nullish(),
     })
     .nullish(),
+  extra_content: ToolCallExtraContentSchema.nullish(),
 });
 export type ToolCallDelta = z.infer<typeof ToolCallDeltaSchema>;
 
