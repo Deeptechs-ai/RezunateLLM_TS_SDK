@@ -240,6 +240,8 @@ export interface StreamState {
   toolCallCount: number;
   /** Provider block/part position → our tool-call index (used by Anthropic). */
   toolIndexByBlock: Map<number, number>;
+  /** Provider blocks whose tool arguments have started arriving (used by Anthropic). */
+  toolBlocksWithArgs: Set<number>;
 }
 
 /** URL, body and headers for the streaming POST. */
@@ -497,6 +499,7 @@ export abstract class BaseProvider {
       roleSent: false,
       toolCallCount: 0,
       toolIndexByBlock: new Map(),
+      toolBlocksWithArgs: new Set(),
     };
   }
 
