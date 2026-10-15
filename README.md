@@ -1,322 +1,244 @@
-# rezunate-llm-sdk (TypeScript)
+# Rezunate LLM SDK (TypeScript)
 
-Unified TypeScript SDK for chat completions across multiple AI providers, using the OpenAI request/response format. It is the TypeScript version of the Python SDK [`rezunate-llm-sdk`](https://pypi.org/project/rezunate-llm-sdk/).
+Unified TypeScript SDK for chat completions, prompt management, and PII guardrails across OpenAI, Anthropic, Google Gemini, Grok (xAI), DeepSeek, Meta, and Qwen (Alibaba). All requests and responses use the OpenAI format, regardless of provider — streaming included.
 
->**Work in progress.** Chat and tool calls, normal and streaming, work with all providers. Other features of the Python SDK are being ported; see [Status](#status). The package is not published to npm yet.
+Get an API key and learn more at [rezunatellm.com](https://rezunatellm.com). Also available for Python: [`rezunate-llm-sdk` on PyPI](https://pypi.org/project/rezunate-llm-sdk/).
 
-## Status
+## What's Included
 
-| Feature | Status |
-|---|---|
-| Chat completion with OpenAI, Anthropic, Google (Gemini), Grok (xAI), DeepSeek, Qwen (Alibaba) and Meta | ✅ Done |
-| Provider factory and registry (same design as the Python SDK) | ✅ Done |
-| Automatic retries (one rule for all providers), timeouts, errors returned as a response | ✅ Done |
-| Organization-level API keys (`organization`, `project`, `workspaceId`) | ✅ Done |
-| Streaming, with the same retries and error rule for all providers | ✅ Done |
-| Tool calls (all providers, normal chat and streaming) | ✅ Done |
-| Prompts (fetch and render prompts saved on the Rezunate website) | ✅ Done |
-| Local guardrails (regex rules from a YAML file: block, flag, redact) | ✅ Done |
-| Server guardrails (hosted PII scan) and reversible masking | ✅ Done |
-| `Gateway` class (defaults, prompts, chat, local and server guardrails, reversible masking) | ✅ Done |
-| `rezunate-guard` CLI | ⏳ Planned |
-
-## Requirements
-
-- Node.js **22 or newer** (see `.nvmrc`)
-- [pnpm](https://pnpm.io/) for development
-
-## Quick start
-
-Every provider takes the same OpenAI-format request and returns the same OpenAI-format response:
-
-```ts
-import { chatComplete, type ChatCompletionRequest } from "rezunate-llm-sdk";
-
-const messages: ChatCompletionRequest["messages"] = [
-  { role: "system", content: "You are a helpful assistant." },
-  { role: "user", content: "In one sentence, what is TypeScript?" },
-];
-
-const response = await chatComplete({
-  provider: "openai",
-  apiKey: process.env.OPENAI_API_KEY!,
-  request: { model: "gpt-4o-mini", messages },
-});
-
-if (response.error) {
-  console.error(response.error.code, response.error.message);
-} else {
-  console.log(response.choices[0]?.message.content);
-  console.log(response.choices[0]?.finish_reason); // "stop", "length", "content_filter" or "tool_calls"
-  console.log(response.choices[0]?.provider_finish_reason); // the provider's own value (OpenAI: "stop", Anthropic: "end_turn")
-  console.log(response.usage); // { prompt_tokens, completion_tokens, total_tokens }
-}
-```
-
-To use another provider, change only `provider`, `apiKey` and `model`:
-
-```ts
-await chatComplete({
-  provider: "anthropic",
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-  request: { model: "claude-haiku-4-5", messages, max_tokens: 200 },
-});
-```
-
-### Errors
-
-The SDK follows one rule:
-
-| What went wrong | Example | What you get |
+| Feature | Cost | Requires |
 |---|---|---|
-| **Your request is invalid** | unknown provider, wrong `role`, a setting with the wrong type (e.g. `top_k: "abc"`) | `chatComplete` **throws** right away, so the mistake shows up during development |
-| **The provider or the network failed** | wrong API key, rate limit, server error, timeout | a normal response with **`error`** set (`message`, `code`, `retries_attempted`) and empty `choices`; nothing is thrown |
+| Unified chat completions across seven providers, streaming or not | **Free** | Your own provider API key |
+| Local regex guardrails (block / flag / redact PII in inputs and outputs) | **Free** | Nothing — runs client-side |
+| Server-side PII detection, with reversible masking | Hosted | Rezunate API key |
+| Prompt management with versioning | Hosted | Rezunate API key |
+| `rezunate-guard` — PII redaction for Claude Code, no code required | Hosted | Coming soon to the TypeScript package |
 
-```ts
-try {
-  const response = await chatComplete({
-    provider: "openai",
-    apiKey: process.env.OPENAI_API_KEY!,
-    request: { model: "gpt-4o-mini", messages },
-  });
-  if (response.error) {
-    // The provider or network failed (after retries).
-    console.error(response.error.code, response.error.message);
-  }
-} catch (err) {
-  // The request itself was invalid: fix the code.
-}
+You only need a Rezunate API key for the hosted features.
+
+## Installation
+
+```bash
+npm install rezunate-llm-sdk
 ```
 
-Streaming works differently: nothing throws, every problem comes as an error chunk (see [Streaming](#streaming)).
+Requires Node.js 22 or newer. Works with `pnpm add` and `yarn add` too, and ships both ESM and CommonJS builds with TypeScript types.
 
-### Retries
-
-Every provider uses the same retry rule. A failed call is retried on **429, 500, 502, 503, 504**, timeouts and connection errors, waiting 1s, 2s, then 4s (plus a small random delay). Other errors, such as 400 or 401, are not retried. After the last attempt, `error.retries_attempted` says how many retries were made.
-
-The defaults are 3 retries, a 1-second base delay and a 60-second timeout. To change them, create the provider yourself:
-
-```ts
-import { getProvider } from "rezunate-llm-sdk";
-
-const provider = getProvider("openai", process.env.OPENAI_API_KEY!, {
-  maxRetries: 5,
-  retryDelay: 2, // seconds
-  timeout: 30, // seconds
-});
-const response = await provider.chatComplete({ model: "gpt-4o-mini", messages });
-```
-
-### Streaming
-
-Set `stream: true` to get the answer in small pieces (chunks) as it is written. `chatComplete` then returns the chunks to loop over with `for await` (no `await` before `chatComplete`):
-
-```ts
-const stream = chatComplete({
-  provider: "anthropic",
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-  request: { model: "claude-haiku-4-5", messages, stream: true },
-});
-
-for await (const chunk of stream) {
-  if (chunk.error) {
-    console.error(chunk.error.code, chunk.error.message);
-    break;
-  }
-  process.stdout.write(chunk.choices[0]?.delta.content ?? "");
-  if (chunk.choices[0]?.finish_reason) {
-    console.log("\n", chunk.choices[0].finish_reason, chunk.usage);
-  }
-}
-```
-
-Every provider sends chunks in the OpenAI format (`object: "chat.completion.chunk"`):
-
-- The first chunk usually has `delta.role: "assistant"`; the next ones have the new text in `delta.content`.
-- The last chunk has `finish_reason` and `provider_finish_reason`, the same as in a normal response.
-- `usage` is filled when the provider sends it, usually in the last chunk. OpenAI-format providers send it only when you ask with `stream_options: { include_usage: true }` in the request.
-
-How problems are reported:
-
-- **Everything comes as a chunk.** With `stream: true` nothing throws, not even for an invalid request or an unknown provider: you get one chunk with `error` set (`message`, `code`, `retries_attempted`) and empty `choices`, and the stream ends. `error.type` is `"invalid_request_error"` when your request was the problem, and `"api_error"` when the provider or the network failed.
-- **Only the start is retried.** If the stream cannot be opened (429, 5xx, timeout, connection error), it is retried with the [same rule](#retries) as normal chat. Once text has arrived it is never retried, because that would repeat the text; the stream ends with an error chunk instead, after the chunks already sent.
-- **The timeout counts silence, not total time.** A stream fails only when no data arrives for `timeout` seconds, so long answers are not cut off.
-
-To stop early, `break` out of the loop; the connection is closed.
-
-### Tool calls
-
-Give the model your functions in `tools` (OpenAI format). When it wants one, the reply has `message.tool_calls` and `finish_reason: "tool_calls"`. Run the function, send the result back as a `tool` message, and ask again:
-
-```ts
-const tools: ChatCompletionRequest["tools"] = [
-  {
-    type: "function",
-    function: {
-      name: "get_weather",
-      description: "Get the current weather for a city",
-      parameters: { type: "object", properties: { city: { type: "string" } }, required: ["city"] },
-    },
-  },
-];
-const history: ChatCompletionRequest["messages"] = [
-  { role: "user", content: "What's the weather in Paris?" },
-];
-
-const first = await chatComplete({
-  provider: "anthropic",
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-  request: { model: "claude-haiku-4-5", messages: history, tools },
-});
-
-const call = first.choices[0]?.message.tool_calls?.[0];
-if (call) {
-  const args = JSON.parse(call.function.arguments); // { city: "Paris" }
-  const result = { city: args.city, temp_c: 18 }; // run your real function here
-
-  history.push(
-    { role: "assistant", content: first.choices[0]?.message.content ?? null, tool_calls: [call] },
-    { role: "tool", tool_call_id: call.id, name: call.function.name, content: JSON.stringify(result) },
-  );
-
-  const final = await chatComplete({
-    provider: "anthropic",
-    apiKey: process.env.ANTHROPIC_API_KEY!,
-    request: { model: "claude-haiku-4-5", messages: history, tools },
-  });
-  console.log(final.choices[0]?.message.content);
-}
-```
-
-`tool_choice` can be `"auto"`, `"none"`, `"required"` or `{ type: "function", function: { name: "get_weather" } }`.
-
-| `provider` | How tools are handled |
-|---|---|
-| `openai`, `grok`, `deepseek`, `meta` | Sent and returned as they are (OpenAI format) |
-| `anthropic` | Translated to and from Anthropic's `tool_use` / `tool_result` blocks |
-| `google` | Translated to and from Gemini's `functionCall` / `functionResponse` parts. Gemini sends no call id, so one is made up (`call_…`) |
-| `qwen` | Sent under DashScope's `parameters` (also accepts `parallel_tool_calls`) |
-
-#### Tool calls in streams
-
-With `stream: true`, tool calls arrive in pieces in `delta.tool_calls`, in OpenAI's format for every provider. The first piece of a call has `index`, `id` and `function.name`; later pieces add to `function.arguments`. Join the pieces by `index` (`tools` and `history` as in the example above):
-
-```ts
-const calls: { id: string; name: string; arguments: string }[] = [];
-
-for await (const chunk of chatComplete({
-  provider: "anthropic",
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-  request: { model: "claude-haiku-4-5", messages: history, tools, stream: true },
-})) {
-  for (const piece of chunk.choices[0]?.delta.tool_calls ?? []) {
-    calls[piece.index] ??= { id: "", name: "", arguments: "" };
-    const call = calls[piece.index]!;
-    call.id ||= piece.id ?? "";
-    call.name ||= piece.function?.name ?? "";
-    call.arguments += piece.function?.arguments ?? "";
-  }
-  if (chunk.choices[0]?.finish_reason === "tool_calls") {
-    console.log(calls); // [{ id: "toolu_…", name: "get_weather", arguments: '{"city":"Paris"}' }]
-  }
-}
-```
-
-Some providers send a whole call in one piece (Gemini, Grok); the same code works for both.
-
-## Providers
-
-| `provider` | Example model | API | Notes |
-|---|---|---|---|
-| `openai` | `gpt-4o-mini` | OpenAI (official `openai` library) | Optional `organization` / `project` |
-| `anthropic` | `claude-haiku-4-5` | Anthropic Messages API | `max_tokens` defaults to 1024. Optional `workspaceId` |
-| `google` | `gemini-2.5-flash` | Gemini API | |
-| `grok` | `grok-3-mini` | xAI (OpenAI-compatible) | |
-| `deepseek` | `deepseek-chat` | DeepSeek (OpenAI-compatible) | |
-| `qwen` | `qwen-plus` | Alibaba DashScope (Singapore region) | Optional `workspaceId` |
-| `meta` | `muse-spark-1.3` | Meta Model API (OpenAI-compatible) | US developers, public preview. Keys at [dev.meta.ai](https://dev.meta.ai) |
-
-Model names change often; check each provider's documentation for the current list. `getAvailableProviders()` returns the provider names above.
-
-### Organization-level API keys
-
-Some providers let one key work across several organizations, projects or workspaces. Pass the extra setting to `chatComplete`; providers that don't use a setting ignore it.
-
-| Setting | Used by | Effect |
-|---|---|---|
-| `organization` | OpenAI | Sent as the `OpenAI-Organization` header |
-| `project` | OpenAI | Sent as the `OpenAI-Project` header |
-| `workspaceId` | Anthropic | Sent as the `anthropic-workspace-id` header (required for organization-level keys) |
-| `workspaceId` | Qwen | Uses the workspace domain `https://{workspaceId}.ap-southeast-1.maas.aliyuncs.com/api/v1`. Because the ID becomes part of the hostname, only letters, numbers and `-` are allowed; anything else throws before a request is sent. |
-
-```ts
-await chatComplete({
-  provider: "anthropic",
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-  workspaceId: process.env.ANTHROPIC_WORKSPACE_ID, // e.g. "wrkspc_01J..."
-  request: { model: "claude-haiku-4-5", messages },
-});
-```
-
-## The Gateway and prompts
-
-### The Gateway
-
-`Gateway` remembers your settings, so you don't pass them on every call:
+## Quickstart
 
 ```ts
 import { Gateway } from "rezunate-llm-sdk";
 
 const gateway = new Gateway({
-  defaultProvider: "openai",
-  defaultApiKey: process.env.OPENAI_API_KEY,
-  rezunateLlmApiKey: process.env.REZUNATE_LLM_API_KEY, // only needed for prompts
+  defaultProvider: "anthropic",
+  defaultApiKey: "your-provider-api-key",
 });
 
-const response = await gateway.chatComplete({ model: "gpt-4o-mini", messages });
+const response = await gateway.chatComplete({
+  model: "claude-sonnet-4-5",
+  messages: [{ role: "user", content: "Hello!" }],
+  max_tokens: 100,
+});
 
-// Use another provider for one call:
-await gateway.chatComplete(
-  { model: "claude-haiku-4-5", messages },
-  { provider: "anthropic", apiKey: process.env.ANTHROPIC_API_KEY },
-);
+console.log(response.choices[0]?.message.content);
 ```
 
-`gateway.chatComplete` works like `chatComplete` (streaming, tool calls, the same error rule). Without a provider or API key it throws `Provider must be specified` / `API key must be specified` (with `stream: true`, these come as an error chunk). The Rezunate client is created on first use, so chat alone needs no Rezunate key. Pass `guardrailsConfig` to apply [local guardrails](#local-guardrails) on every call, and `serverGuardrails` for the [hosted PII scan](#server-guardrails-and-reversible-masking).
-
-### Prompts
-
-Write prompts on the [Rezunate website](https://rezunatellm.com) (Dashboard → Prompts), with `{{variable}}` placeholders. Each prompt gets a `slug_id` (for example `customer_support_reply_0nqr73`) and a version that increases with every edit. The SDK fetches a prompt by its `slug_id` and fills in the placeholders, so prompts can change without changing code.
-
-You need a Rezunate API key (Dashboard → API Keys). Pass it as `rezunateLlmApiKey` (as above), or set the `REZUNATE_LLM_API_KEY` environment variable. With the `gateway` from above:
+The stateless form is also available when you don't want a long-lived gateway:
 
 ```ts
-const systemPrompt = await gateway.getPrompt("customer_support_reply_0nqr73", {
-  company_name: "Acme",
-  customer_name: "Ali",
-  customer_message: "My order hasn't arrived yet.",
-  tone: "friendly",
-  max_words: "80",
-});
+import { chatComplete } from "rezunate-llm-sdk";
 
-const reply = await gateway.chatComplete({
-  model: "gpt-4o-mini",
-  messages: [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: "Where is my order?" },
-  ],
+const response = await chatComplete({
+  provider: "openai",
+  apiKey: "your-openai-api-key",
+  request: {
+    model: "gpt-4o",
+    messages: [{ role: "user", content: "Hello!" }],
+  },
 });
 ```
 
-- Without a version, the prompt's current version is used; pass one to pin it: `gateway.getPrompt(slug, variables, 1)`.
-- A placeholder without a value throws `Missing template variables: …`; extra values are ignored.
-- A failed request throws `RouterAPIError` with the server's message and `statusCode` (for example `Prompt not found`, 404). Prompts follow the "invalid request throws" side of the [error rule](#errors).
+Responses always come back in OpenAI format (`response.choices[0].message.content`, `response.usage.total_tokens`, etc.) — whichever provider served the call.
 
-The same steps are available on their own: `new RouterClient({ apiKey })`, `getPrompt(client, slugId, version)` and `renderPrompt(content, variables)`.
+**Errors.** An invalid request (an unknown provider, a wrong `role`) throws right away. A provider or network failure (a wrong API key, a rate limit, a timeout) does not throw: the response has `error` set (`message`, `code`, `retries_attempted`) and empty `choices`, so check `response.error`. Failed calls are retried automatically on 429, 5xx, timeouts and connection errors (3 retries by default).
 
-## Local guardrails
+## Providers
 
-Define rules in a YAML file to **block**, **flag** or **redact** sensitive content (PII or anything custom) in the messages you send and in the model's replies. Everything runs in your app: no Rezunate account is needed and no data leaves your machine.
+Seven providers ship with the SDK, all behind the same request and response shape:
+
+| Provider | `provider` | Wire protocol |
+|---|---|---|
+| OpenAI | `openai` | OpenAI Chat Completions |
+| Anthropic | `anthropic` | Anthropic Messages |
+| Google Gemini | `google` | Gemini `generateContent` |
+| Grok (xAI) | `grok` | OpenAI-compatible |
+| DeepSeek | `deepseek` | OpenAI-compatible |
+| Meta | `meta` | Meta Model API (OpenAI-compatible) |
+| Qwen (Alibaba) | `qwen` | DashScope native |
+
+The SDK ships with a factory that creates provider instances on demand. You bring your own API key per provider — Rezunate doesn't proxy or charge for these calls.
+
+```ts
+import { getAvailableProviders, getProvider } from "rezunate-llm-sdk";
+
+// List the providers the SDK supports
+console.log(getAvailableProviders());
+// ["openai", "anthropic", "google", "grok", "meta", "deepseek", "qwen"]
+
+// Build a provider instance directly (skips the Gateway/chatComplete facade)
+const provider = getProvider("anthropic", "your-anthropic-key", {
+  maxRetries: 5, // optional: retries, retryDelay and timeout (in seconds)
+});
+const response = await provider.chatComplete({
+  model: "claude-sonnet-4-5",
+  messages: [{ role: "user", content: "Hi!" }],
+});
+```
+
+You can also switch providers at call time on a single `Gateway`:
+
+```ts
+const gateway = new Gateway();
+
+await gateway.chatComplete(request, { provider: "openai", apiKey: openaiKey });
+await gateway.chatComplete(request, { provider: "anthropic", apiKey: anthropicKey });
+await gateway.chatComplete(request, { provider: "google", apiKey: googleKey });
+```
+
+A gateway's `defaultApiKey` is only used with its `defaultProvider`; a call that switches to another provider must pass that provider's own `apiKey`.
+
+**Organization-level keys.** Pass `organization` / `project` (OpenAI) or `workspaceId` (Anthropic, Qwen) with a call when your key spans several organizations or workspaces:
+
+```ts
+await gateway.chatComplete(request, {
+  provider: "anthropic",
+  apiKey: anthropicKey,
+  workspaceId: "wrkspc_01J...",
+});
+```
+
+### Request Parameters
+
+The request follows the OpenAI schema and supports the common knobs:
+
+```ts
+await gateway.chatComplete({
+  model: "gpt-4o",
+  messages: [
+    { role: "system", content: "You are concise." },
+    { role: "user", content: "Summarize the last commit." },
+  ],
+  temperature: 0.2,
+  max_tokens: 500,
+  top_p: 0.9,
+  frequency_penalty: 0.0,
+  presence_penalty: 0.0,
+  stop: ["END"],
+});
+```
+
+Provider-specific arguments (e.g. Google `top_k`, `safety_settings`) are accepted as extra fields and forwarded by each provider's transformer.
+
+## Streaming
+
+Set `stream: true` and the call returns an async iterable of `ChatCompletionChunk` objects instead of a single response. Every provider streams, and every one yields the same OpenAI chunk shape.
+
+```ts
+const stream = gateway.chatComplete({
+  model: "claude-sonnet-4-5",
+  messages: [{ role: "user", content: "Write a haiku about latency." }],
+  max_tokens: 200,
+  stream: true,
+});
+
+for await (const chunk of stream) {
+  if (chunk.error) {
+    console.error("stream failed:", chunk.error.message);
+    break;
+  }
+  for (const choice of chunk.choices) {
+    process.stdout.write(choice.delta.content ?? "");
+  }
+}
+```
+
+`delta.role` is set on the first chunk only, `finish_reason` on the last. Nothing throws on a stream — not a provider or network failure, and not an invalid request: the stream yields a single chunk with `error` populated and stops, so check `chunk.error` in the loop. Only opening the stream is retried; once text has arrived, a failure ends the stream with an error chunk.
+
+Guardrails behave differently on a stream: local regex `block` rules end the stream with an error chunk (`error.type: "guardrail_error"`), but local `redact` rules only log (deltas are not rewritten). Hosted guardrails buffer output to a sentence boundary, scan, and emit redacted text — use `serverGuardrails: true` when redacting streamed output matters.
+
+## Tool Calling
+
+Define tools in OpenAI format and the SDK translates them to each provider's native shape (Anthropic `tool_use`, Google `functionCall`) and normalizes the response back to OpenAI `tool_calls`.
+
+Tool support by provider: OpenAI, Grok, DeepSeek and Meta pass tools through natively; Anthropic and Google are translated both ways; Qwen sends them in DashScope's tool format.
+
+```ts
+import { type ChatCompletionRequest, Gateway } from "rezunate-llm-sdk";
+
+const gateway = new Gateway({ defaultProvider: "anthropic", defaultApiKey: "your-anthropic-key" });
+
+const tools: ChatCompletionRequest["tools"] = [
+  {
+    type: "function",
+    function: {
+      name: "get_weather",
+      description: "Look up the current weather for a city",
+      parameters: {
+        type: "object",
+        properties: { city: { type: "string" } },
+        required: ["city"],
+      },
+    },
+  },
+];
+
+const messages: ChatCompletionRequest["messages"] = [
+  { role: "user", content: "What's the weather in Tokyo?" },
+];
+
+const response = await gateway.chatComplete({
+  model: "claude-sonnet-4-5",
+  messages,
+  tools,
+  tool_choice: "auto", // "auto" | "required" | "none" | { type: "function", function: { name: "get_weather" } }
+  max_tokens: 300,
+});
+
+const choice = response.choices[0];
+const call = choice?.message.tool_calls?.[0];
+if (choice?.finish_reason === "tool_calls" && call) {
+  console.log(call.function.name); // "get_weather"
+  console.log(call.function.arguments); // '{"city":"Tokyo"}'  (a JSON string)
+}
+```
+
+Run the tool, then send the result back as a `tool` message to get the final answer:
+
+```ts
+const args = JSON.parse(call.function.arguments);
+const result = `Sunny, 22C in ${args.city}`; // your real tool goes here
+
+messages.push(
+  { role: "assistant", content: null, tool_calls: choice.message.tool_calls },
+  { role: "tool", content: result, tool_call_id: call.id },
+);
+
+const final = await gateway.chatComplete({
+  model: "claude-sonnet-4-5",
+  messages,
+  tools,
+  max_tokens: 300,
+});
+console.log(final.choices[0]?.message.content);
+```
+
+With `stream: true`, tool calls arrive in pieces in `delta.tool_calls` (OpenAI's format) for every provider: join the pieces by `index`, adding each piece's `function.arguments` to the call.
+
+## Local Regex Guardrails (Free)
+
+Define regex patterns in YAML to **block**, **flag**, or **redact** sensitive content (PII or anything custom) in both user inputs and model outputs. Everything is free and runs client-side — no RezunateLLM account needed, no data leaves your machine.
+
+Create a config file:
 
 ```yaml
 # guardrails.yaml
@@ -326,231 +248,207 @@ guardrails:
     description: "Block Social Security Numbers"
     action: block
 
+  # Redact PII instead of blocking the whole request/response.
   - name: redact-email
     pattern: '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'
     description: "Redact email addresses"
     action: redact
     replacement: "[EMAIL]"
 
-  - name: flag-api-key
-    pattern: '\bsk-[A-Za-z0-9]{20,}\b'
-    description: "Flag leaked API keys"
+  - name: flag-credit-card
+    pattern: '\b(?:\d[ -]*?){13,16}\b'
+    description: "Flag potential credit card numbers"
     action: flag
 ```
 
-Each rule has a `name`, a `pattern` and optionally a `description`, an `action` and a `replacement`. Rules are checked in order.
+Each rule needs:
+- `name` — identifier
+- `pattern` — regex to match (a JavaScript regular expression)
+- `description` — human-readable description
+- `action` — one of:
+  - `block` — throws `GuardrailsError`, stopping the request (input) or response (output)
+  - `flag` — records a violation and logs it, but lets the content through unchanged
+  - `redact` — replaces every match with `replacement` (defaults to `[REDACTED]`) in both the prompt sent to the provider and the model's response
+- `replacement` — text substituted for each match when `action: redact` (optional; defaults to `[REDACTED]`)
 
-| `action` | What happens when the pattern matches |
-|---|---|
-| `block` (default) | Throws `GuardrailsError` (`Guardrail 'block-ssn' triggered on INPUT: …`) |
-| `redact` | Replaces every match with `replacement` (default `[REDACTED]`). **In streamed replies it only warns, so the matched text still reaches the user; use `block` to stop it in streams.** |
-| `flag` | Lets the text through unchanged and prints a warning |
+Use it in two ways:
 
-**`pattern` is a JavaScript regular expression.** Common patterns, like the ones above, are the same as in Python. `loadGuardrails` checks every pattern when the file is loaded and throws `Invalid regex in rule '…'` for one that isn't valid. A few tips:
-
-- JavaScript has no inline flags such as Python's `(?i)`; for case-insensitive matching use classes such as `[Ss][Ss][Nn]`.
-- Patterns run on every message, so avoid ones that can backtrack badly (for example `(a+)+`), and never leave a pattern empty: it matches everything.
-
-Use the rules in one of two ways:
+**Pass it explicitly to a Gateway:**
 
 ```ts
 import { Gateway, loadGuardrails } from "rezunate-llm-sdk";
 
 const guardrailsConfig = loadGuardrails("guardrails.yaml");
-
-// For every call of a gateway (or pass `guardrailsConfig` to a single chatComplete call):
-const guarded = new Gateway({
-  defaultProvider: "openai",
-  defaultApiKey: process.env.OPENAI_API_KEY,
+const gateway = new Gateway({
+  defaultProvider: "anthropic",
+  defaultApiKey: "your-anthropic-key",
   guardrailsConfig,
 });
-await guarded.chatComplete({ model: "gpt-4o-mini", messages });
+
+// Both input and output are checked on every chatComplete call.
+await gateway.chatComplete(request);
 ```
 
-Or set the `GUARDRAILS_FILE_PATH` environment variable to the file's path: it's loaded once and applied to every call that doesn't pass its own `guardrailsConfig`. If the file can't be loaded, a warning is printed and no rules are applied.
+**Or enable automatic loading via env var:**
 
-How the rules are applied:
+```bash
+export GUARDRAILS_FILE_PATH=path/to/guardrails.yaml
+```
 
-- **Messages you send:** every message is checked before the request. `redact` changes the text that is sent, and also your own `messages` objects, as in the Python SDK (so they hold `[EMAIL]` afterwards).
-- **Replies:** every choice is checked. `redact` replaces the text in the reply; `block` throws.
-- **Streams:** each chunk is checked. A `block` rule ends the stream with an error chunk (`error.type: "guardrail_error"`), like every other stream problem; the text streamed before it has already reached the user. `flag` and `redact` only print a warning and chunks pass unchanged, because a match can be split across chunks.
-- **Rule order:** every rule is matched against the original text, so a `block` rule still fires on text that an earlier `redact` rule replaced.
-- **What is checked:** the text of messages and replies. Tool-call arguments are not checked.
-- **Warnings:** violations are printed with `console.warn`, in the Python SDK's format, including the matched text: `GUARDRAIL FLAG [OUTPUT]: rule_name='flag-api-key' rule_description='…' match='sk-…'`.
+When set, the SDK loads the file once and applies the rules on every `chatComplete` call without explicit wiring.
 
-You can also check a text yourself. `checkGuardrails` returns `[redactedText, violations]` and throws `GuardrailsError` for a `block` rule:
+You can also call the checker directly. `checkGuardrails` returns a `[redactedText, violations]` pair and throws `GuardrailsError` on a `block` rule:
 
 ```ts
 import { checkGuardrails, GuardrailsError, loadGuardrails } from "rezunate-llm-sdk";
 
-const config = loadGuardrails("guardrails.yaml");
+const config = loadGuardrails("guardrails.yaml"); // with a redact rule for emails
 try {
   const [redacted, violations] = checkGuardrails("Email me at alex@example.com", config, "output");
-  console.log(redacted); // "Email me at [EMAIL]"
-  console.log(violations); // the rules that matched
+  console.log(redacted); // -> "Email me at [EMAIL]"  (redact rules applied)
+  // 'flag' rules show up in `violations`; 'block' rules throw GuardrailsError
 } catch (error) {
   if (error instanceof GuardrailsError) {
-    console.log(`Blocked by '${error.ruleName}' on ${error.direction}`);
+    console.log(`Blocked by rule '${error.ruleName}' on ${error.direction}`);
   }
 }
 ```
 
-## Server guardrails and reversible masking
+## Hosted Features
 
-### Hosted PII scan
+These call the Rezunate API and require a Rezunate API key (passed to `Gateway` as `rezunateLlmApiKey`, or set as `REZUNATE_LLM_API_KEY`).
 
-The Rezunate server can find PII (names, emails, phone numbers and more) with a model, using your workspace's guardrail settings on the Rezunate website (language, entity types, action and threshold). It needs a Rezunate API key (`rezunateLlmApiKey` or `REZUNATE_LLM_API_KEY`). Turn it on in the `Gateway`:
+### Server-side PII Detection (Premium Feature)
+
+Detect PII entities using the workspace guardrail config managed in RezunateLLM. Returns model-detected entities, with labels, scores, and offsets.
+
+```ts
+const gateway = new Gateway({ rezunateLlmApiKey: "your-rezunate-api-key" });
+
+const result = await gateway.guardrails.scan(
+  "My SSN is 123-45-6789 and my email is alex@example.com.",
+);
+
+for (const entity of result.entities) {
+  console.log(`${entity.label}: ${JSON.stringify(entity.text)} (score=${entity.score.toFixed(2)})`);
+}
+
+console.log("action:", result.action); // action taken per workspace config
+console.log("blocked:", result.blocked); // whether the request was blocked
+console.log("text:", result.text); // processed text (e.g. with PII redacted)
+```
+
+#### Automatic PII guardrails on input and output
+
+Set `serverGuardrails: true` and the Gateway scans every `chatComplete` call with the hosted PII service, applying the workspace config automatically:
+
+- if the scan **blocks** the content → throws `ServerGuardrailsError` (in a stream: an error chunk)
+- if the scan **redacts** it → the content is replaced with the server's redacted text (the prompt before it's sent, or the response after)
 
 ```ts
 import { Gateway, ServerGuardrailsError } from "rezunate-llm-sdk";
 
-const scanned = new Gateway({
+const gateway = new Gateway({
   defaultProvider: "openai",
-  defaultApiKey: process.env.OPENAI_API_KEY,
-  rezunateLlmApiKey: process.env.REZUNATE_LLM_API_KEY,
-  serverGuardrails: true, // scan the messages and the reply
+  defaultApiKey: "your-openai-key",
+  serverGuardrails: true, // scan input AND output via hosted PII service
+  rezunateLlmApiKey: "your-rezunate-api-key",
 });
 
 try {
-  const reply = await scanned.chatComplete({ model: "gpt-4o-mini", messages });
-  console.log(reply.choices[0]?.message.content); // with PII redacted by the server
+  const response = await gateway.chatComplete(request);
+  console.log(response.choices[0]?.message.content); // PII redacted by the server
 } catch (error) {
   if (error instanceof ServerGuardrailsError) {
-    console.log(error.message); // "Server guardrail blocked INPUT: detected US_SSN"
+    console.log(`Blocked on ${error.direction} — detected ${error.entities.map((e) => e.label)}`);
   }
 }
 ```
 
-- `serverGuardrails: true` scans both sides; `{ directions: ["output"] }` (or `["input"]`) scans one. It's off by default, and a call can override it: `chatComplete(request, { serverGuardrails: false })`.
-- **Messages** are scanned before they are sent, and **replies** after they arrive. When the server's action is to block, `ServerGuardrailsError` is thrown (with `direction`, `entities` and `action`); otherwise the text is replaced with the server's redacted text. As with local guardrails, your own `messages` hold the redacted text afterwards.
-- **Streams:** the reply's text is collected and scanned a few sentences at a time, so PII split across chunks is still found. This adds a short delay before text appears. A block, or a failed scan, ends the stream with an error chunk (`error.type` `"guardrail_error"` or `"api_error"`).
-- The scan can take longer when the PII service starts up; it waits up to 180 seconds. A failed scan throws `RouterAPIError`.
-- To scan any text yourself: `await gateway.guardrails.scan(text)`, which returns `{ entities, action, blocked, text }`.
+**Choosing which side to scan.** `true` scans both the prompt (input) and the model response (output). To scan only one side, pass `directions`:
 
-### Reversible masking
+```ts
+const gateway = new Gateway({
+  defaultProvider: "openai",
+  defaultApiKey: "your-openai-key",
+  serverGuardrails: { directions: ["output"] }, // output only
+  rezunateLlmApiKey: "your-rezunate-api-key",
+});
+```
 
-With `reversible: true`, PII in your messages is replaced with numbered placeholders before it's sent (for example `[EMAIL_ADDRESS_1]`), and the placeholders in the reply are put back to the real values. The model never sees the PII, but your users get a complete answer. Placeholders come from the hosted scan and from local `redact` rules.
+| `serverGuardrails` value | Scans |
+|---|---|
+| `true` | input **and** output |
+| `{ directions: ["input"] }` | input only |
+| `{ directions: ["output"] }` | output only |
+| `false` (default) | nothing |
+
+You can also override it per call: `gateway.chatComplete(request, { serverGuardrails: ... })`. This runs alongside any local regex guardrails.
+
+#### Reversible masking
+
+With `reversible: true`, PII in the prompt is replaced with placeholders before it's sent (for example `[EMAIL_ADDRESS_7f3a]`), and the placeholders in the response are put back to the real values. The model never sees the PII, but your users get a complete answer. Placeholders come from the hosted scan and from local `redact` rules.
 
 ```ts
 import { MaskVault } from "rezunate-llm-sdk";
 
-const masked = new Gateway({
-  defaultProvider: "openai",
-  defaultApiKey: process.env.OPENAI_API_KEY,
-  rezunateLlmApiKey: process.env.REZUNATE_LLM_API_KEY,
-  serverGuardrails: { directions: ["input"] },
-});
-
-// Sent as "My email is [EMAIL_ADDRESS_1]"; the reply comes back with the real email.
-const answer = await masked.chatComplete(
-  { model: "gpt-4o-mini", messages: [{ role: "user", content: "My email is john@acme.com" }] },
-  { reversible: true },
+// Sent as "My email is [EMAIL_ADDRESS_7f3a]"; the response comes back with the real email.
+const answer = await gateway.chatComplete(
+  { model: "gpt-4o", messages: [{ role: "user", content: "My email is alex@example.com" }] },
+  { serverGuardrails: { directions: ["input"] }, reversible: true },
 );
 
 // To keep the same placeholders across a conversation, pass your own vault and save it:
 const vault = new MaskVault();
-await masked.chatComplete({ model: "gpt-4o-mini", messages }, { reversible: true, vault });
+await gateway.chatComplete(request, { vault });
 const saved = vault.dumps(); // holds real PII: store it encrypted
 const resumed = MaskVault.loads(saved);
 ```
 
-- Each call uses a new vault unless you pass one. **Keep one vault per end-user, and never share a vault between users.**
-- `rehydrate: false` keeps the reply masked; restore it later with `vault.restore(text)` or `unmask(text, vault)`.
-- Streams are restored too, even when a placeholder is split across chunks.
-- The plain `chatComplete` also accepts a `vault`: it masks the messages but leaves the reply masked.
+Each call uses a new vault unless you pass one. Keep one vault per end-user, and never share a vault between users.
 
-## Try it locally (for testers)
+### Prompt Management
 
-The package is not on npm yet. To test it the way a user would, build it, pack it, and install it in a separate folder:
+Fetch and render prompts stored on Rezunate LLM. Pin to a specific version, or omit `version` to use the current one. Variables are interpolated into the template before returning.
 
-```bash
-# 1. In this repo: build and pack (creates rezunate-llm-sdk-0.0.0.tgz)
-nvm use
-pnpm install
-pnpm build
-pnpm pack
+```ts
+const gateway = new Gateway({
+  defaultProvider: "anthropic",
+  defaultApiKey: "your-anthropic-api-key",
+  rezunateLlmApiKey: "your-rezunate-api-key",
+});
 
-# 2. In a new folder outside the repo
-mkdir ../rezunate-sdk-playground && cd ../rezunate-sdk-playground
-echo 22 > .nvmrc && nvm use
-npm init -y
-npm pkg set type=module
-npm install ../RezunateLLM_TS_SDK/rezunate-llm-sdk-0.0.0.tgz
+const systemPrompt = await gateway.getPrompt(
+  "customer-support-greeting",
+  { name: "Alex", tier: "premium" },
+  3, // optional — defaults to current version
+);
+
+const response = await gateway.chatComplete({
+  model: "claude-sonnet-4-5",
+  messages: [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: "Where's my order?" },
+  ],
+});
 ```
 
-Put your API keys in a `.env` file in that folder, write a `test.ts` that imports `chatComplete` from `"rezunate-llm-sdk"` (see [Quick start](#quick-start)), and run it:
+A missing variable throws `Missing template variables: …`, and a prompt or version that doesn't exist throws `RouterAPIError`.
 
-```bash
-node --env-file=.env test.ts
-```
+## Claude Code PII Guard
 
-Node 22 runs `.ts` files directly. These calls use real API keys and cost a small amount.
+`rezunate-guard` redacts PII from your files **before Claude Code sends them to the model**, with no code required. It is available today in the [Python package](https://pypi.org/project/rezunate-llm-sdk/) and is coming soon to the TypeScript package.
 
-## Development
+## Environment Variables
 
-```bash
-nvm use        # Node 22
-pnpm install   # also installs the pre-commit hook
-```
-
-| Command | What it does |
+| Variable | Purpose |
 |---|---|
-| `pnpm test` | Run all tests (no real network calls; HTTP is mocked) |
-| `pnpm typecheck` | TypeScript type check |
-| `pnpm lint` | Biome lint and format check (`pnpm lint:fix` to fix) |
-| `pnpm build` | Build ESM + CJS + type declarations into `dist/` |
-
-Before every commit, a pre-commit hook runs Biome on the staged files, the type check and the tests, and blocks the commit if any of them fail.
-
-### Project layout
-
-```
-src/
-└── rezunateLlmSdk/          # the library (rezunate_llm_sdk/ in Python)
-    ├── index.ts             # public exports
-    ├── gateway.ts           # chatComplete() and the Gateway class
-    ├── client.ts            # RouterClient for the Rezunate LLM API
-    ├── api.ts               # Rezunate LLM API endpoints (getPrompt)
-    ├── prompts.ts           # renderPrompt()
-    ├── guardrails.ts        # loadGuardrails() and checkGuardrails() (local guardrails)
-    ├── masking.ts           # MaskVault (reversible masking)
-    ├── models.ts            # request/response models (zod)
-    ├── constants.ts
-    ├── providers/           # one file per provider, plus base, factory and endpoints
-    └── streaming/           # SSE parser used by the streaming providers
-tests/                       # one *.test.ts per area; fixtures.ts holds shared test data
-```
-
-The `rezunate-guard` CLI will live next to the library in `src/rezunateGuard/`, as in the Python repository.
-
-## Differences from the Python SDK
-
-The TypeScript SDK is meant to behave like the Python SDK. These differences are intentional:
-
-1. **One retry rule for every provider.** All seven providers retry through the SDK's own loop (429/500/502/503/504, timeouts and connection errors; 1s → 2s → 4s; `maxRetries` and `retryDelay` always apply). In Python, OpenAI, Grok and DeepSeek are retried by the `openai` library with its own rules (it also retries 408 and 409, and ignores `retry_delay`), and the others by the SDK's loop.
-2. **`retries_attempted` is filled in, for every provider.** When a request finally fails, `error.retries_attempted` shows how many retries were made (for example `3` after 4 failed attempts, `0` when the error was not retried). In Python it is always empty.
-3. **Finish reasons never break a reply.** Anthropic, Gemini and the OpenAI-format providers keep adding new stop/finish reasons (for example Anthropic's `refusal`, `pause_turn` and `model_context_window_exceeded`, or Gemini's `TOO_MANY_TOOL_CALLS`). The TS SDK translates every value the providers document today, and any value it doesn't know yet becomes `"stop"`, instead of failing. The provider's original value is always kept in `choices[].provider_finish_reason`. Gemini's image-only reasons (`IMAGE_SAFETY`, `IMAGE_PROHIBITED_CONTENT`, `IMAGE_RECITATION`, `IMAGE_OTHER`, `NO_IMAGE`) are not translated, because the SDK is text-only, so they also become `"stop"`. The same applies to streams. The Python SDK only accepts a fixed list, so a reply with a newer value (even ones its own mapping handles, such as Gemini's `BLOCKLIST` or `PROHIBITED_CONTENT`) is rejected and returned as an error.
-4. **`meta` replaces `llama`.** Meta retired the Llama API (`api.llama.com`). The `meta` provider uses Meta's new OpenAI-compatible Meta Model API (`https://api.meta.ai/v1`) with the Muse Spark models. The Python SDK still has the `llama` provider for the retired API.
-5. **Organization-level API keys are supported** (`organization`, `project`, `workspaceId`; see above). The Python SDK has none of these, so, for example, an organization-level Anthropic key fails there with "not scoped to a workspace".
-6. **Blocked Gemini prompts are reported.** When Gemini blocks the question itself (it returns no answer, only `promptFeedback.blockReason`), the TS SDK returns one choice with no content, `finish_reason: "content_filter"` and the reason in `provider_finish_reason` (e.g. `"SAFETY"`), the same way a blocked answer is reported. In a stream, the same comes as one chunk. The Python SDK drops the reason and returns no choices and no error (in a stream: no chunks at all).
-7. **TypeScript naming and style.** Functions and options use camelCase (`chatComplete`, `apiKey`), and the inputs are passed as one object (`chatComplete({ provider, apiKey, request })`). JSON fields sent to and received from providers keep their original names (`max_tokens`, `finish_reason`, and so on).
-8. **The start of a stream is retried, for every provider.** In Python, Anthropic, Google and Qwen streams are never retried, and OpenAI-format streams are retried by the `openai` library with its own rules.
-9. **Stream problems never throw.** With `stream: true`, every problem, including an invalid request or an unknown provider, comes as an error chunk. In Python, an invalid streaming request throws, and only provider and network failures come as error chunks.
-10. **Error messages include the provider's explanation.** When a provider rejects a request, `error.message` adds the provider's own message (for example `404 Not Found for url: … - model: xyz`), in normal chat and in streams. In Python, Anthropic, Google and Qwen errors have only the status and the URL; the OpenAI-format providers include the message in both.
-11. **Qwen supports tool calls.** Tools, `tool_choice`, `parallel_tool_calls`, tool calls in replies and `tool` messages work with Qwen (DashScope uses OpenAI's tool format). The Python SDK drops tools on Qwen and rejects `tool` messages.
-12. **`function_call` means a tool call.** `function_call` is OpenAI's old name for `tool_calls`, and OpenAI-compatible APIs such as Meta's may still send it. The TS SDK translates it to `finish_reason: "tool_calls"`; the Python SDK rejects the reply.
-13. **Gemini tool results find their function name.** Gemini matches a tool result by function name, not by id. When a `tool` message has no `name`, the TS SDK takes the name from the tool call with the same `tool_call_id` earlier in the conversation. The Python SDK sends the `tool_call_id` as the name, which Gemini may not match.
-14. **Anthropic `tool_choice: "none"` is sent.** The TS SDK sends it as `{ "type": "none" }`, so Claude calls no tools. The Python SDK leaves it out, so Anthropic's default (`auto`) applies and the model may still call a tool.
-15. **Gemini gets parallel tool results together.** When the model calls several tools at once, Gemini needs all their results in one message. The TS SDK groups `tool` messages that follow each other into one message; the Python SDK sends one message per result, which Gemini rejects.
-16. **Gemini accepts full JSON Schema for tools.** The TS SDK sends a tool's schema to Gemini as `parametersJsonSchema`, so keywords such as `additionalProperties` (required by OpenAI's strict mode) and `$ref` work. The Python SDK uses Gemini's older `parameters` field, which rejects them with a 400 error.
-17. **Tool calls work in streams.** With `stream: true`, tool calls arrive as pieces in `delta.tool_calls` (OpenAI's format) for every provider, and Gemini ends with `finish_reason: "tool_calls"`. In the Python SDK, stream chunks carry only text, so the tool call is lost (Gemini even ends with `"stop"`).
-18. **A guardrail block in a stream comes as an error chunk.** With `stream: true`, a local `block` rule, a server-side block or a failed scan ends the stream with one error chunk (`error.type` `"guardrail_error"`, or `"api_error"` for a failed scan), like every other stream problem. The Python SDK raises `GuardrailsError` / `ServerGuardrailsError` in the middle of the stream. Without `stream`, both SDKs throw.
-
-## Known limitations
-
-These behave the same as in the Python SDK and will be improved in later features:
-
-- **Several system messages (Anthropic, Google):** these providers take a single system prompt, so when a request has more than one `system` message, only the last one is sent.
+| `REZUNATE_LLM_API_KEY` | Rezunate API key — required for hosted features (prompts, server-side scan) |
+| `OPENAI_API_KEY` | OpenAI provider key — used by your application code |
+| `ANTHROPIC_API_KEY` | Anthropic provider key — used by your application code |
+| `GEMINI_API_KEY` | Google Gemini provider key — used by your application code |
+| `GUARDRAILS_FILE_PATH` | Optional path to a local guardrails YAML config; loaded automatically when set |
+| `REZUNATE_LLM_BASE_URL` | Rezunate API base URL (default `https://rezunatellm.com`) |
 
 ## License
 
