@@ -1,11 +1,10 @@
 name: CI
 
 # Checks only (lint, type check, tests, build); it never publishes.
+# Runs on every PR, whatever branch it targets, and on every push to any branch.
 on:
   pull_request:
-    branches: [develop, main]
   push:
-    branches: [develop, main]
 
 permissions:
   contents: read
