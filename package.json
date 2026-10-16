@@ -1,7 +1,22 @@
 {
   "name": "rezunate-llm-sdk",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Unified TypeScript SDK for chat completions across multiple AI providers",
+  "keywords": [
+    "llm",
+    "ai",
+    "openai",
+    "anthropic",
+    "gemini",
+    "chat-completions",
+    "guardrails",
+    "pii",
+    "sdk"
+  ],
+  "homepage": "https://rezunatellm.com",
+  "bugs": {
+    "url": "https://github.com/Deeptechs-ai/RezunateLLM_TS_SDK/issues"
+  },
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -30,6 +45,9 @@
     "dist"
   ],
   "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
@@ -38,6 +56,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "prepare": "husky"
   },
   "lint-staged": {

@@ -1,5 +1,8 @@
 /** Global constants for Rezunate LLM. */
 
+/** Oldest Node.js major version the SDK supports (keep in step with `engines` in package.json). */
+export const MIN_NODE_MAJOR = 22;
+
 // HTTP Headers
 export const CONTENT_TYPE_HEADER = "Content-Type";
 export const APPLICATION_JSON = "application/json";
