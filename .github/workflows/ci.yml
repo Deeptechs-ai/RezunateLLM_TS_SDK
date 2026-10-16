@@ -1,10 +1,12 @@
 name: CI
 
 # Checks only (lint, type check, tests, build); it never publishes.
-# Runs on every PR, whatever branch it targets, and on every push to any branch.
+# Every PR, whatever branch it targets, is checked on each push to it (merged with its base
+# branch). Pushes to develop and main check the code after a merge.
 on:
   pull_request:
   push:
+    branches: [develop, main]
 
 permissions:
   contents: read
@@ -12,10 +14,6 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node: [22, 24] # the supported LTS versions
-    name: check (Node ${{ matrix.node }})
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -23,10 +21,11 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
 
-      - name: Set up Node.js
+      # Everything runs on the oldest supported Node.js (from .nvmrc)...
+      - name: Set up Node.js (oldest supported)
         uses: actions/setup-node@v5
         with:
-          node-version: ${{ matrix.node }}
+          node-version-file: .nvmrc
           cache: pnpm
 
       - name: Install dependencies
@@ -50,3 +49,14 @@ jobs:
 
       - name: Check the package types
         run: pnpm dlx @arethetypeswrong/cli --pack .
+
+      # ...and the tests run again on the newest LTS, which follows new releases (24, 26, ...).
+      - name: Set up Node.js (newest LTS)
+        uses: actions/setup-node@v5
+        with:
+          node-version: lts/*
+
+      - name: Test on the newest LTS
+        run: |
+          node --version
+          pnpm test
