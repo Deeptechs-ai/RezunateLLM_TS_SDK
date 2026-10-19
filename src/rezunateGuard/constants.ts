@@ -10,6 +10,17 @@ import {
 
 export const CONFIG_FILENAME = ".rezunate-guard.yaml";
 
+/** What `init` writes. It parses, and protects nothing until a folder is uncommented. */
+export const CONFIG_TEMPLATE = `# rezunate-guard — nothing is scanned until you list it here.
+#
+# List the folders holding personal data. Everything inside one is redacted before
+# Claude Code sends it to the model. Paths are relative to this file, and an absolute
+# path works too. Each scanned file is a billable API call, so list only what needs it.
+scan:
+  # - clients
+  # - data/patients
+`;
+
 export const HOME_ENV = "REZUNATE_HOME";
 export const API_KEY_ENV = REZUNATE_LLM_API_KEY_ENV;
 export const BASE_URL_ENV = REZUNATE_LLM_BASE_URL_ENV;
