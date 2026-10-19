@@ -45,8 +45,9 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
-      - name: Update npm (trusted publishing needs 11.5.1 or newer)
-        run: npm install -g npm@latest
+      # Pinned, so every release uses the same tested npm (trusted publishing needs 11.5.1+).
+      - name: Install npm
+        run: npm install -g npm@11.21.1
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
