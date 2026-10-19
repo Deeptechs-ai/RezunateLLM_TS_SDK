@@ -4,6 +4,12 @@
  * using the OpenAI-compatible request/response format.
  */
 
+import { assertSupportedNode } from "./runtime";
+
+// An unsupported Node.js version fails here with a clear message. A call in the entry file,
+// so the build keeps it (`"sideEffects": false` lets it drop a side-effect-only import).
+assertSupportedNode(globalThis.process?.versions?.node);
+
 export { getPrompt, scanText } from "./api";
 export {
   RouterAPIError,
