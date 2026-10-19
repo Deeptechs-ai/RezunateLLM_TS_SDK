@@ -1,4 +1,4 @@
-/** Tests for writing owner-only files (the Python `private_file` has no tests of its own). */
+/** Tests for writing owner-only files. */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";

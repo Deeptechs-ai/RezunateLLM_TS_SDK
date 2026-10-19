@@ -1,7 +1,4 @@
-/**
- * Tests for the command line, ported from the Python `tests/guard/test_cli.py` (the `init`,
- * `login`, `check` and `--version` tests; the rest arrive with the commands they test).
- */
+/** Tests for the command line. */
 
 import {
   existsSync,
@@ -128,7 +125,6 @@ describe("check", () => {
 });
 
 describe("--version", () => {
-  // Python's argparse exits here; `main` returns the exit code instead.
   it("prints the packaged version", async () => {
     expect(await main(["--version"])).toBe(0);
     expect(out.trim()).toBe(VERSION);

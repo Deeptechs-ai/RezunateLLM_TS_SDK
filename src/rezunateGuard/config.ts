@@ -254,11 +254,11 @@ export function shouldScan(filePath: string, config?: GuardConfig): boolean {
   return scanDecision(filePath, config).shouldScan;
 }
 
-// ---- Python's pathlib, which these rules were written for ----
+// ---- path helpers ----
 
 /**
- * An absolute path with symlinks followed, like Python's `Path.resolve()`: the part that
- * exists is resolved for real, and the rest is appended as written.
+ * An absolute path with symlinks followed: the part that exists is resolved for real, and the
+ * rest is appended as written.
  */
 export function resolvePath(path: string): string {
   const missing: string[] = [];
@@ -277,13 +277,13 @@ export function resolvePath(path: string): string {
   }
 }
 
-/** Whether `path` is `folder` or anything inside it, like Python's `is_relative_to`. */
+/** Whether `path` is `folder` or anything inside it, comparing whole path segments. */
 export function isInside(path: string, folder: string): boolean {
   const rel = relative(folder, path);
   return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
-/** Expand a leading `~`, like Python's `expanduser`; throws for `~name`, which Node can't look up. */
+/** Expand a leading `~` to the home directory; throws for `~name`, which Node can't look up. */
 export function expandUser(path: string): string {
   if (path === "~" || path.startsWith("~/")) {
     return join(homedir(), path.slice(1));
@@ -302,7 +302,7 @@ function isDirectory(path: string): boolean {
   return existsSync(path) && statSync(path).isDirectory();
 }
 
-/** Python's falsiness for a parsed YAML document: nothing, false, 0, "", [] or {}. */
+/** Whether a parsed YAML document is empty: nothing, false, 0, "", [] or {}. */
 function isEmpty(value: unknown): boolean {
   if (Array.isArray(value)) {
     return value.length === 0;
@@ -317,7 +317,7 @@ function isSystemError(error: unknown): error is Error {
   return error instanceof Error && typeof (error as NodeJS.ErrnoException).code === "string";
 }
 
-/** A value written as Python's `repr` would, so messages read the same as in Python. */
+/** A value as it appears in messages: strings quoted, `None` for nothing, `True`/`False`. */
 export function repr(value: unknown): string {
   if (typeof value === "string") {
     const quote = value.includes("'") && !value.includes('"') ? '"' : "'";

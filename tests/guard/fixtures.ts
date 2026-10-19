@@ -1,6 +1,6 @@
 /**
- * Shared test setup for rezunate-guard, the counterpart of the Python `tests/guard/conftest.py`:
- * keep the test run off the developer's machine and off the network.
+ * Shared test setup for rezunate-guard: keep the test run off the developer's machine and off
+ * the network.
  */
 
 import { mkdtempSync, rmSync } from "node:fs";

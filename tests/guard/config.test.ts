@@ -1,4 +1,4 @@
-/** Tests for the scan decision, ported from the Python `tests/guard/test_config.py`. */
+/** Tests for the scan decision. */
 
 import {
   chmodSync,
@@ -26,7 +26,7 @@ import { useIsolatedHome } from "./fixtures";
 
 useIsolatedHome();
 
-/** A fresh folder per test (pytest's `tmp_path`), resolved like Python's `tmp_path`. */
+/** A fresh folder per test, with symlinks resolved. */
 let tmp = "";
 beforeEach(() => {
   tmp = resolvePath(mkdtempSync(join(tmpdir(), "guard-config-")));
@@ -266,7 +266,7 @@ describe("problems are logged", () => {
 
 // One tool call asks about many paths, and they usually share a config.
 describe("reusing a parse", () => {
-  // Python counts calls to its private `_parse`; here, the cached object is returned again.
+  // A cache hit returns the very same object.
   it("parses an unchanged config once", () => {
     const path = write(tmp, constants.CONFIG_FILENAME, "scan:\n  - clients\n");
     const first = loadConfig(path);

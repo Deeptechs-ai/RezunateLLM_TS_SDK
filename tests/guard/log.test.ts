@@ -1,4 +1,4 @@
-/** Tests for the problem log, ported from the Python `tests/guard/test_log.py`. */
+/** Tests for the problem log. */
 
 import { chmodSync, existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";

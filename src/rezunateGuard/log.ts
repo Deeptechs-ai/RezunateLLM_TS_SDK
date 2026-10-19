@@ -24,14 +24,14 @@ export function problem(source: string, message: string): void {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     writeFileSync(path, `${lines.slice(-constants.LOG_MAX_LINES).join("\n")}\n`, "utf8");
   } catch (error) {
-    // Only file-system errors (Python's OSError); anything else is a bug and is raised.
+    // Only file-system errors; anything else is a bug and is raised.
     if (!isSystemError(error)) {
       throw error;
     }
   }
 }
 
-/** The file's lines, without line endings (Python's `splitlines`). */
+/** The file's lines, without line endings. */
 function readLines(path: string): string[] {
   const lines = readFileSync(path, "utf8").split(/\r\n|\r|\n/);
   if (lines.at(-1) === "") {

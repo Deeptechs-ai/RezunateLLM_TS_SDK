@@ -12,7 +12,7 @@ import { write as writePrivate } from "./privateFile";
 const PROG = "rezunate-guard";
 const DESCRIPTION = "Redact PII from files before Claude Code sends them to the model.";
 
-/** The package version (Python reads it from the installed package's metadata). */
+/** The package version. */
 export const VERSION = packageJson.version;
 
 // ANSI codes for the words `status` is really answering with.
@@ -30,7 +30,7 @@ function paint(text: string, code: string): string {
 
 /** Prompts, kept on one object so tests can replace them. */
 export const prompts = {
-  /** Ask for a secret without echoing it (Python's `getpass`). Resolves "" if interrupted. */
+  /** Ask for a secret without echoing it. Resolves "" if interrupted. */
   secret: readSecret,
 };
 
@@ -93,7 +93,7 @@ function commandCheck(args: { paths: string[] }): number {
   return 0;
 }
 
-// ---- argument parsing, with argparse's usage and error messages ----
+// ---- argument parsing ----
 
 /** One subcommand: its help line, its usage, and how to run it from the parsed arguments. */
 interface Command {
@@ -134,7 +134,7 @@ const COMMANDS: Record<string, Command> = {
 const CHOICES = `{${Object.keys(COMMANDS).join(",")}}`;
 const MAIN_USAGE = `usage: ${PROG} [-h] [--version] ${CHOICES} ...`;
 
-/** Print an argparse-style usage error to stderr; argparse exits with 2. */
+/** Print a usage error to stderr. Returns 2, the exit code for a usage error. */
 function usageError(command: string | null, message: string): number {
   const usage = command ? `usage: ${PROG} ${COMMANDS[command]?.usage}` : MAIN_USAGE;
   const prog = command ? `${PROG} ${command}` : PROG;
@@ -244,7 +244,7 @@ function readSecret(question: string): Promise<string> {
       stdin.off("data", onData);
       stdin.setRawMode(false);
       stdin.pause();
-      // Close the line the prompt left open (Python writes it to stderr when interrupted).
+      // Close the line the prompt left open (on stderr when interrupted).
       (interrupted ? process.stderr : stdout).write("\n");
       resolve(value);
     };
