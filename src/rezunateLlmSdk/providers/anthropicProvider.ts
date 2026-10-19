@@ -173,6 +173,8 @@ export class AnthropicProvider extends BaseProvider {
       throw new Error(`Invalid Anthropic "${event}" event: ${parsed.error.message}`);
     }
     const payload = parsed.data;
+    // The content block a block event belongs to.
+    const blockIndex = payload.index ?? 0;
 
     if (event === "message_start") {
       state.id = payload.message?.id || state.id;
@@ -188,7 +190,7 @@ export class AnthropicProvider extends BaseProvider {
       }
       // Tools are numbered 0, 1, … in the order they start, like OpenAI's index.
       const index = state.toolCallCount++;
-      state.toolIndexByBlock.set(payload.index ?? 0, index);
+      state.toolCallByBlock.set(blockIndex, { index, hasArgs: false });
       return this.makeChunk(state, {
         delta: {
           tool_calls: [
@@ -209,24 +211,23 @@ export class AnthropicProvider extends BaseProvider {
         return this.makeChunk(state, { delta: { content: text } });
       }
       const json = payload.delta?.partial_json;
-      const index = state.toolIndexByBlock.get(payload.index ?? 0);
-      if (payload.delta?.type === "input_json_delta" && json && index !== undefined) {
-        state.toolBlocksWithArgs.add(payload.index ?? 0);
+      const call = state.toolCallByBlock.get(blockIndex);
+      if (payload.delta?.type === "input_json_delta" && json && call) {
+        call.hasArgs = true;
         return this.makeChunk(state, {
-          delta: { tool_calls: [{ index, function: { arguments: json } }] },
+          delta: { tool_calls: [{ index: call.index, function: { arguments: json } }] },
         });
       }
-      return null;
     }
 
     if (event === "content_block_stop") {
       // A tool with no inputs streams no JSON; send "{}" so its arguments parse, as in normal chat.
-      const index = state.toolIndexByBlock.get(payload.index ?? 0);
-      return index === undefined || state.toolBlocksWithArgs.has(payload.index ?? 0)
-        ? null
-        : this.makeChunk(state, {
-            delta: { tool_calls: [{ index, function: { arguments: "{}" } }] },
-          });
+      const call = state.toolCallByBlock.get(blockIndex);
+      if (call && !call.hasArgs) {
+        return this.makeChunk(state, {
+          delta: { tool_calls: [{ index: call.index, function: { arguments: "{}" } }] },
+        });
+      }
     }
 
     if (event === "message_delta") {
