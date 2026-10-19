@@ -284,7 +284,7 @@ export function isInside(path: string, folder: string): boolean {
 }
 
 /** Expand a leading `~`, like Python's `expanduser`; throws for `~name`, which Node can't look up. */
-function expandUser(path: string): string {
+export function expandUser(path: string): string {
   if (path === "~" || path.startsWith("~/")) {
     return join(homedir(), path.slice(1));
   }
