@@ -19,7 +19,7 @@ You only need a Rezunate API key for the hosted features.
 ## Installation
 
 ```bash
-npm install rezunate-llm-sdk
+npm install @rezunatellm/llm-sdk
 ```
 
 Requires Node.js 22 or newer. Works with `pnpm add` and `yarn add` too, and ships both ESM and CommonJS builds with TypeScript types.
@@ -27,7 +27,7 @@ Requires Node.js 22 or newer. Works with `pnpm add` and `yarn add` too, and ship
 ## Quickstart
 
 ```ts
-import { Gateway } from "rezunate-llm-sdk";
+import { Gateway } from "@rezunatellm/llm-sdk";
 
 const gateway = new Gateway({
   defaultProvider: "anthropic",
@@ -46,7 +46,7 @@ console.log(response.choices[0]?.message.content);
 The stateless form is also available when you don't want a long-lived gateway:
 
 ```ts
-import { chatComplete } from "rezunate-llm-sdk";
+import { chatComplete } from "@rezunatellm/llm-sdk";
 
 const response = await chatComplete({
   provider: "openai",
@@ -79,7 +79,7 @@ Seven providers ship with the SDK, all behind the same request and response shap
 The SDK ships with a factory that creates provider instances on demand. You bring your own API key per provider — Rezunate doesn't proxy or charge for these calls.
 
 ```ts
-import { getAvailableProviders, getProvider } from "rezunate-llm-sdk";
+import { getAvailableProviders, getProvider } from "@rezunatellm/llm-sdk";
 
 // List the providers the SDK supports
 console.log(getAvailableProviders());
@@ -173,7 +173,7 @@ Define tools in OpenAI format and the SDK translates them to each provider's nat
 Tool support by provider: OpenAI, Grok, DeepSeek and Meta pass tools through natively; Anthropic and Google are translated both ways; Qwen sends them in DashScope's tool format.
 
 ```ts
-import { type ChatCompletionRequest, Gateway } from "rezunate-llm-sdk";
+import { type ChatCompletionRequest, Gateway } from "@rezunatellm/llm-sdk";
 
 const gateway = new Gateway({ defaultProvider: "anthropic", defaultApiKey: "your-anthropic-key" });
 
@@ -276,7 +276,7 @@ Use it in two ways:
 **Pass it explicitly to a Gateway:**
 
 ```ts
-import { Gateway, loadGuardrails } from "rezunate-llm-sdk";
+import { Gateway, loadGuardrails } from "@rezunatellm/llm-sdk";
 
 const guardrailsConfig = loadGuardrails("guardrails.yaml");
 const gateway = new Gateway({
@@ -300,7 +300,7 @@ When set, the SDK loads the file once and applies the rules on every `chatComple
 You can also call the checker directly. `checkGuardrails` returns a `[redactedText, violations]` pair and throws `GuardrailsError` on a `block` rule:
 
 ```ts
-import { checkGuardrails, GuardrailsError, loadGuardrails } from "rezunate-llm-sdk";
+import { checkGuardrails, GuardrailsError, loadGuardrails } from "@rezunatellm/llm-sdk";
 
 const config = loadGuardrails("guardrails.yaml"); // with a redact rule for emails
 try {
@@ -346,7 +346,7 @@ Set `serverGuardrails: true` and the Gateway scans every `chatComplete` call wit
 - if the scan **redacts** it → the content is replaced with the server's redacted text (the prompt before it's sent, or the response after)
 
 ```ts
-import { Gateway, ServerGuardrailsError } from "rezunate-llm-sdk";
+import { Gateway, ServerGuardrailsError } from "@rezunatellm/llm-sdk";
 
 const gateway = new Gateway({
   defaultProvider: "openai",
@@ -390,7 +390,7 @@ You can also override it per call: `gateway.chatComplete(request, { serverGuardr
 With `reversible: true`, PII in the prompt is replaced with placeholders before it's sent (for example `[EMAIL_ADDRESS_7f3a]`), and the placeholders in the response are put back to the real values. The model never sees the PII, but your users get a complete answer. Placeholders come from the hosted scan and from local `redact` rules.
 
 ```ts
-import { MaskVault } from "rezunate-llm-sdk";
+import { MaskVault } from "@rezunatellm/llm-sdk";
 
 // Sent as "My email is [EMAIL_ADDRESS_7f3a]"; the response comes back with the real email.
 const answer = await gateway.chatComplete(

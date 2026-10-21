@@ -10,7 +10,7 @@ export function assertSupportedNode(version: string | undefined): void {
   const major = Number(version?.split(".")[0]);
   if (version && major < constants.MIN_NODE_MAJOR) {
     throw new Error(
-      `rezunate-llm-sdk requires Node.js ${constants.MIN_NODE_MAJOR} or newer (you have ${version}).`,
+      `@rezunatellm/llm-sdk requires Node.js ${constants.MIN_NODE_MAJOR} or newer (you have ${version}).`,
     );
   }
 }
