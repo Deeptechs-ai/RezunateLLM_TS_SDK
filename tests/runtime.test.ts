@@ -10,7 +10,7 @@ describe("assertSupportedNode", () => {
 
   it("rejects an older Node.js with a clear message", () => {
     expect(() => assertSupportedNode("20.11.1")).toThrow(
-      "rezunate-llm-sdk requires Node.js 22 or newer (you have 20.11.1).",
+      "@rezunatellm/llm-sdk requires Node.js 22 or newer (you have 20.11.1).",
     );
   });
 
