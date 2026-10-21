@@ -12,7 +12,6 @@ Get an API key and learn more at [rezunatellm.com](https://rezunatellm.com). Als
 | Local regex guardrails (block / flag / redact PII in inputs and outputs) | **Free** | Nothing — runs client-side |
 | Server-side PII detection, with reversible masking | Hosted | Rezunate API key |
 | Prompt management with versioning | Hosted | Rezunate API key |
-| `rezunate-guard` — PII redaction for Claude Code, no code required | Hosted | Coming soon to the TypeScript package |
 
 You only need a Rezunate API key for the hosted features.
 
@@ -435,9 +434,7 @@ const response = await gateway.chatComplete({
 
 A missing variable throws `Missing template variables: …`, and a prompt or version that doesn't exist throws `RouterAPIError`.
 
-## Claude Code PII Guard
 
-`rezunate-guard` redacts PII from your files **before Claude Code sends them to the model**, with no code required. It is available today in the [Python package](https://pypi.org/project/rezunate-llm-sdk/) and is coming soon to the TypeScript package.
 
 ## Environment Variables
 
